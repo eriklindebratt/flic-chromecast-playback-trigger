@@ -1,0 +1,11 @@
+.DS_Store
+*.pyc
+__pycache__
+
+flic-client.log
+flic-client.error.log
+
+flic-server.log
+flic-server.error.log
+fliclib-linux-hci
+flic.sqlite3
