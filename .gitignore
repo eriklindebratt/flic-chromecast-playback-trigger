@@ -7,5 +7,5 @@ flic-client.error.log
 
 flic-server.log
 flic-server.error.log
+flic-server.db
 fliclib-linux-hci
-flic.sqlite3

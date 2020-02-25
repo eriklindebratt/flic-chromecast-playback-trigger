@@ -79,7 +79,10 @@ def gotInfo(items):
     for bdAddr in items['bd_addr_of_verified_buttons']:
         gotButton(bdAddr)
 
+logger.info('Waiting for button clicks...')
+
 flicClient.get_info(gotInfo)
 flicClient.on_new_verified_button = gotButton
 
 flicClient.handle_events()
+
