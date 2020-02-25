@@ -3,17 +3,81 @@ import pychromecast
 from mimetypes import MimeTypes
 import logging
 import sys
+import threading
+from datetime import datetime, timedelta
+
+logging.getLogger('pychromecast').setLevel(logging.WARN)
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def getDevice(deviceName):
-    logger.info('scanning for chromecast device "{}"...'.format(deviceName))
-    chromecasts = pychromecast.get_chromecasts()
-    cast = next(cc for cc in chromecasts if cc.device.friendly_name == deviceName)
+devices = []
+deviceScanTimer = None
 
-    # Start worker thread and wait for cast device to be ready
-    logger.info('chromecast device found...')
+CONTINUOUS_DEVICE_SCAN_INTERVAL = 8.0  # in seconds
+
+def scanForDevices():
+    global devices, deviceScanTimer
+
+    if deviceScanTimer is not None and deviceScanTimer.is_alive():
+        deviceScanTimer.cancel()
+        deviceScanTimer = None
+
+    logger.debug('Scanning for devices...')
+
+    devices = pychromecast.get_chromecasts(tries=1)
+
+    logger.info(
+        'Device scan completed. Scheduling next scan for {}.'.format(
+            (
+                datetime.utcnow() +
+                timedelta(seconds=CONTINUOUS_DEVICE_SCAN_INTERVAL)
+            ).strftime('%Y-%m-%d %H:%M:%S')
+        )
+    )
+
+    # continue to scan every N seconds
+    deviceScanTimer = threading.Timer(
+        CONTINUOUS_DEVICE_SCAN_INTERVAL,
+        scanForDevices
+    )
+    deviceScanTimer.start()
+
+def setup():
+    logger.info('Setting up...')
+
+    scanForDevices()
+
+    logger.info('Setup completed\n---')
+
+def getDevice(deviceName, calledFromSelf=False):
+    if not calledFromSelf:
+        logger.debug('Getting device "{}"'.format(deviceName))
+
+    try:
+        cast = next(cc for cc in devices if cc.device.friendly_name == deviceName)
+    except StopIteration:
+        if not calledFromSelf:
+            logger.warn(
+                'Device "{}" not found - trigger new device scan'.format(
+                    deviceName
+                )
+            )
+
+            scanForDevices()
+
+            return getDevice(deviceName, calledFromSelf=True)
+        else:
+            logger.warn(
+                'Device "{}" not found (tried scanning anew)'.format(
+                    deviceName
+                )
+            )
+
+            return None
+
+    # start worker thread and wait for cast device to be ready
+    logger.debug('Device found'.format(deviceName))
     cast.wait()
 
     return cast
@@ -22,7 +86,7 @@ def stop(device):
     if not device:
         return
 
-    logger.info('stopping playback')
+    logger.info('Stopping playback on "{}"'.format(device.name))
 
     device.media_controller.stop()
 
@@ -30,7 +94,7 @@ def quit(device):
     if not device:
         return
 
-    logger.info('quitting')
+    logger.info('Closing Chromecast application "{}"'.format(device.name))
 
     device.quit_app()
 
@@ -38,17 +102,18 @@ def setVolume(device, volume):
     if not device:
         return
 
-    logger.info('setting device volume to {}%...'.format(volume * 100))
+    logger.info(
+        'Setting volume to {}% on "{}"'.format(
+            volume * 100,
+            device.name
+        )
+    )
     device.set_volume(volume)
 
 def isPlaying(device):
-    logger.debug('isPlaying - status: {}'.format(device.status))
-    logger.debug('isPlaying - mc.status: {}'.format(device.media_controller.status))
-    logger.debug('isPlaying: {}'.format(device.media_controller.is_playing))
-
     return device.media_controller.is_playing
 
-def play(data, device):
+def play(data, device=None):
     if data is None:
         data = {}
 
@@ -63,9 +128,17 @@ def play(data, device):
         mimeType = MimeTypes().guess_type(data['media']['url'])[0]
         mediaArgs['content_type'] = mimeType
     except IndexError:
-        raise Exception('Failed to look up mime type for media url "{}"'.format(data['media']['url']))
+        raise Exception(
+            'Failed to look up mime type for media url "{}"'.format(
+                data['media']['url']
+            )
+        )
     if not mediaArgs.get('content_type'):
-        raise Exception('Failed to look up mime type for media url "{}"'.format(data['media']['url']))
+        raise Exception(
+            'Failed to look up mime type for media url "{}"'.format(
+                data['media']['url']
+            )
+        )
     ########################
 
     if not device:
@@ -76,9 +149,15 @@ def play(data, device):
     if data.get('volume') is not None:
         setVolume(device, data['volume'])
 
+    logger.info('Starting playback on "{}"'.format(device.name))
+    logger.debug('Playing:\n  - url: {}\n  - args: {}'.format(data['media']['url'], mediaArgs))
+
     mc = device.media_controller
-    logger.info('starting playback...\n  - url: {}\n  - args: {}'.format(data['media']['url'], mediaArgs))
+
     mc.play_media(data['media']['url'], **mediaArgs)
     mc.block_until_active()
 
     return device
+
+setup()
+

@@ -30,7 +30,7 @@ def onButtonClick(channel, clickType, wasQueued, timeDiff):
         else:
             castDevice = caster.play({
                 'deviceName': 'Home Group',
-                'volume': 0.15,
+                'volume': 0.2,
                 'media': {
                     'url': 'https://sverigesradio.se/topsy/direkt/srapi/132.mp3',
                     'args': {
@@ -51,7 +51,7 @@ def onButtonClick(channel, clickType, wasQueued, timeDiff):
         else:
             castDevice = caster.play({
                 'deviceName': 'Home Group',
-                'volume': 0.15,
+                'volume': 0.2,
                 'media': {
                     'url': 'https://sverigesradio.se/topsy/direkt/srapi/132.mp3',
                     'args': {
