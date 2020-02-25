@@ -5,6 +5,7 @@ import logging
 import sys
 import threading
 from datetime import datetime, timedelta
+from util import formatTimeDelta
 
 logging.getLogger('pychromecast').setLevel(logging.WARN)
 
@@ -25,10 +26,12 @@ def scanForDevices():
 
     logger.debug('Scanning for devices...')
 
+    startTime = datetime.utcnow()
     devices = pychromecast.get_chromecasts(tries=1)
 
     logger.info(
-        'Device scan completed. Scheduling next scan for {}.'.format(
+        'Device scan completed after {}. Scheduling next scan for {}.'.format(
+            formatTimeDelta(datetime.utcnow() - startTime),
             (
                 datetime.utcnow() +
                 timedelta(seconds=CONTINUOUS_DEVICE_SCAN_INTERVAL)
