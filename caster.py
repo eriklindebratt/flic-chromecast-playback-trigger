@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 devices = []
 deviceScanTimer = None
 
-CONTINUOUS_DEVICE_SCAN_INTERVAL = 8.0  # in seconds
+CONTINUOUS_DEVICE_SCAN_INTERVAL = 900.0  # in seconds
 
 def scanForDevices():
     global devices, deviceScanTimer
