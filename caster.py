@@ -21,8 +21,7 @@ def scanForDevices():
     global devices, deviceScanTimer
 
     if deviceScanTimer is not None and deviceScanTimer.is_alive():
-        deviceScanTimer.cancel()
-        deviceScanTimer = None
+        cancelDeviceScanner()
 
     logger.debug('Scanning for devices...')
 
@@ -45,6 +44,12 @@ def scanForDevices():
         scanForDevices
     )
     deviceScanTimer.start()
+
+def cancelDeviceScanner():
+    global deviceScanTimer
+
+    deviceScanTimer.cancel()
+    deviceScanTimer = None
 
 def setup():
     logger.info('Setting up...')
