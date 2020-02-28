@@ -12,31 +12,77 @@ logging.getLogger('pychromecast').setLevel(logging.WARN)
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+onError = lambda error: None
 devices = []
 deviceScanTimer = None
 
+DEVICE_SCAN_ATTEMPTS_PER_SCAN = 2
 CONTINUOUS_DEVICE_SCAN_INTERVAL = 900.0  # in seconds
 
+def setup(errorHandler=None):
+    global onError
+
+    logger.info('Setting up...')
+
+    if errorHandler is not None:
+        onError = errorHandler
+
+    if not scanForDevices():
+        logger.error('Setup completed with failing scanner\n---')
+    else:
+        logger.info('Setup completed\n---')
+
+
 def scanForDevices():
+    '''
+    Returns: Bool Whether scanner returned any devices or not
+    '''
+
     global devices, deviceScanTimer
 
-    if deviceScanTimer is not None and deviceScanTimer.is_alive():
-        cancelDeviceScanner()
+    # cancel currently running scanner, if any
+    cancelDeviceScanner()
 
-    logger.debug('Scanning for devices...')
+    logger.debug('Scanning for devices at {}...'.format(datetime.utcnow()))
 
     startTime = datetime.utcnow()
-    devices = pychromecast.get_chromecasts(tries=1)
+    devices = pychromecast.get_chromecasts(tries=DEVICE_SCAN_ATTEMPTS_PER_SCAN)
 
-    logger.info(
-        'Device scan completed after {}. Scheduling next scan for {}.'.format(
-            formatTimeDelta(datetime.utcnow() - startTime),
-            (
-                datetime.utcnow() +
-                timedelta(seconds=CONTINUOUS_DEVICE_SCAN_INTERVAL)
-            ).strftime('%Y-%m-%d %H:%M:%S')
+    formattedScanTime = formatTimeDelta(datetime.utcnow() - startTime)
+    formattedNextScanTimestamp = (
+        datetime.utcnow() +
+        timedelta(seconds=CONTINUOUS_DEVICE_SCAN_INTERVAL)
+    ).isoformat()
+
+    gotAcceptableSetOfDevices = devices is not None and len(devices) > 0
+
+    if not gotAcceptableSetOfDevices:
+        logger.error(
+            'Device scan completed with no device(s) found after {} \
+(tried {} time(s)). Scheduling next scan for {}.'.format(
+                formattedScanTime,
+                DEVICE_SCAN_ATTEMPTS_PER_SCAN,
+                formattedNextScanTimestamp
+            )
         )
-    )
+
+        cancelDeviceScanner()
+        onError(
+            Exception(
+                'Device scan completed with no device(s) found (tried {} time(s))'
+                    .format(DEVICE_SCAN_ATTEMPTS_PER_SCAN)
+            )
+        )
+    else:
+        logger.info(
+            'Device scan completed with {} device(s) found after {} \
+(tried {} time(s)). Scheduling next scan for {}.'.format(
+                    len(devices),
+                    formattedScanTime,
+                    DEVICE_SCAN_ATTEMPTS_PER_SCAN,
+                    formattedNextScanTimestamp
+                )
+        )
 
     # continue to scan every N seconds
     deviceScanTimer = threading.Timer(
@@ -45,18 +91,14 @@ def scanForDevices():
     )
     deviceScanTimer.start()
 
+    return gotAcceptableSetOfDevices
+
 def cancelDeviceScanner():
     global deviceScanTimer
 
-    deviceScanTimer.cancel()
-    deviceScanTimer = None
-
-def setup():
-    logger.info('Setting up...')
-
-    scanForDevices()
-
-    logger.info('Setup completed\n---')
+    if deviceScanTimer is not None and deviceScanTimer.is_alive():
+        deviceScanTimer.cancel()
+        deviceScanTimer = None
 
 def getDevice(deviceName, calledFromSelf=False):
     if not calledFromSelf:
@@ -166,6 +208,4 @@ def play(data, device=None):
     mc.block_until_active()
 
     return device
-
-setup()
 

@@ -125,6 +125,10 @@ def onFlicBluetoothControllerStateChange(state):
 
         exit(1)
 
+def onCasterError(error=None):
+    logger.error('Caster got error: {}'.format(error))
+    exit(1)
+
 def exit(exitCode=0):
     logger.info('Stopping subprocesses...')
 
@@ -188,6 +192,8 @@ if __name__ == '__main__':
                     .format(e)
             )
             raise e
+
+    caster.setup(errorHandler=onCasterError)
 
     try:
         logger.info('setting up Flic client')
