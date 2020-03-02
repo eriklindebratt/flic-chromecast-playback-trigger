@@ -7,6 +7,16 @@ import sys
 import os
 import signal
 
+for handler in logging.root.handlers[:]:
+    logging.root.removeHandler(handler)
+logging.basicConfig(
+    stream=sys.stdout,
+    level=logging.INFO,
+    format='%(levelname)s:%(name)s:%(asctime)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S %z'
+)
+logging.getLogger('urllib3').setLevel(logging.INFO)
+
 BLACK_BUTTON_ADDRESS = '80:e4:da:70:32:3b'
 TURQUOISE_BUTTON_ADDRESS = '80:e4:da:73:70:72'
 
@@ -14,6 +24,17 @@ logger = None
 flicClient = None
 flicButtonConnectionChannels = None
 castDevice = None
+deviceNamesToSetVolumeFor = None
+deviceToCastTo = None
+
+def stopAndQuitCasting():
+    global castDevice
+
+    if castDevice is not None:
+        caster.stop(castDevice)
+        caster.quit(castDevice)
+
+        castDevice = None
 
 def playOrStop():
     global castDevice
@@ -25,15 +46,29 @@ def playOrStop():
         return
 
     if castDevice is not None and caster.isPlaying(castDevice):
-        logger.info('currently playing - stopping')
-        caster.stop(castDevice)
-        caster.quit(castDevice)
+        logger.info('Currently playing - stopping')
+        stopAndQuitCasting()
     else:
-        if devicesToSetVolumeFor is not None:
-            [caster.setVolume(
-                i['device'],
-                i['volume']
-            ) for i in devicesToSetVolumeFor]
+        ########################
+        # setting device volumes
+        if deviceNamesToSetVolumeFor is not None:
+            devicesToSetVolumeFor = [
+                {
+                    'device': caster.getDevice(a[0]),
+                    'volume': float(a[1])
+                } for a in [
+                    [
+                        n.strip() for n in i.strip().split('=')
+                    ] for i in deviceNamesToSetVolumeFor.split(',')
+                ]
+            ]
+
+            if devicesToSetVolumeFor is not None:
+                [caster.setVolume(
+                    i['device'],
+                    i['volume']
+                ) for i in devicesToSetVolumeFor]
+        ########################
 
         castDevice = caster.play({
             'deviceName': deviceToCastTo,
@@ -50,20 +85,18 @@ def playOrStop():
 
 
 def onFlicButtonClickOrHold(channel, clickType, wasQueued, timeDiff):
-    global castDevice
-
     if clickType != fliclib.ClickType.ButtonClick:
         return
 
     if channel.bd_addr == BLACK_BUTTON_ADDRESS:
-        logger.info('black button clicked')
+        logger.info('Black button clicked')
         playOrStop()
     elif channel.bd_addr == TURQUOISE_BUTTON_ADDRESS:
-        logger.info('turqouise button clicked')
+        logger.info('Turqouise button clicked')
         playOrStop()
 
 def onFlicButtonConnectionStatusChanged(channel, connectionStatus, disconnectReason):
-    logger.info('Button "{}" changed connection status to: {}{}'.format(
+    logger.debug('Button "{}" changed connection status to: {}{}'.format(
         channel.bd_addr,
         connectionStatus,
         ' ({})'.format(disconnectReason) if connectionStatus == fliclib.ConnectionStatus.Disconnected else ''
@@ -151,9 +184,7 @@ def exit(exitCode=0):
 
     caster.cancelDeviceScanner()
 
-    if castDevice is not None:
-        caster.stop(castDevice)
-        caster.quit(castDevice)
+    stopAndQuitCasting()
 
     logger.info('Exiting with code {}'.format(exitCode))
 
@@ -168,35 +199,15 @@ def onSIGTERM(*args):
     exit(0)
 
 if __name__ == '__main__':
-    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
     logger = logging.getLogger(__name__)
 
-    devicesToSetVolumeFor = os.environ.get('DEVICES_TO_SET_VOLUME_FOR')
+    deviceNamesToSetVolumeFor = os.environ.get('DEVICES_TO_SET_VOLUME_FOR')
     deviceToCastTo = os.environ.get('DEVICE_TO_CAST_TO')
-
-    if devicesToSetVolumeFor is not None:
-        try:
-            devicesToSetVolumeFor = [
-                {
-                    'device': caster.getDevice(a[0]),
-                    'volume': float(a[1])
-                } for a in [
-                    [
-                        n.strip() for n in i.strip().split('=')
-                    ] for i in devicesToSetVolumeFor.split(',')
-                ]
-            ]
-        except Exception as e:
-            logger.error(
-                'Failed to configure devices to set volume for from environment: {}'
-                    .format(e)
-            )
-            raise e
 
     caster.setup(errorHandler=onCasterError)
 
     try:
-        logger.info('setting up Flic client')
+        logger.info('Setting up Flic client')
 
         flicButtonConnectionChannels = []
 
@@ -208,7 +219,6 @@ if __name__ == '__main__':
         logger.error('Failed to start Flic client: {}'.format(e))
         exit(1)
 
-
     signal.signal(signal.SIGINT, onSIGINT)
     signal.signal(signal.SIGTERM, onSIGTERM)
 
@@ -216,3 +226,4 @@ if __name__ == '__main__':
 
     # note that this method is blocking!
     flicClient.handle_events()
+
