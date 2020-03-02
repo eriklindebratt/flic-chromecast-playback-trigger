@@ -204,6 +204,9 @@ if __name__ == '__main__':
     deviceNamesToSetVolumeFor = os.environ.get('DEVICES_TO_SET_VOLUME_FOR')
     deviceToCastTo = os.environ.get('DEVICE_TO_CAST_TO')
 
+    signal.signal(signal.SIGINT, onSIGINT)
+    signal.signal(signal.SIGTERM, onSIGTERM)
+
     caster.setup(errorHandler=onCasterError)
 
     try:
@@ -219,10 +222,7 @@ if __name__ == '__main__':
         logger.error('Failed to start Flic client: {}'.format(e))
         exit(1)
 
-    signal.signal(signal.SIGINT, onSIGINT)
-    signal.signal(signal.SIGTERM, onSIGTERM)
-
-    logger.info('Waiting for button clicks...')
+    logger.info('Ready - waiting for button clicks...\n---')
 
     # note that this method is blocking!
     flicClient.handle_events()

@@ -26,9 +26,9 @@ def setup(errorHandler=None):
         onError = errorHandler
 
     if not scanForDevices():
-        logger.error('Setup completed with failing scanner\n---')
+        logger.error('Setup completed with failing scanner')
     else:
-        logger.info('Setup completed\n---')
+        logger.info('Setup completed')
 
 
 def scanForDevices():
@@ -41,7 +41,7 @@ def scanForDevices():
     # cancel currently running scanner, if any
     cancelDeviceScanner()
 
-    logger.debug('Scanning for devices at {}...'.format(datetime.utcnow()))
+    logger.debug('Scanning for devices...')
 
     startTime = datetime.utcnow()
     devices = pychromecast.get_chromecasts(tries=DEVICE_SCAN_ATTEMPTS_PER_SCAN)
@@ -156,8 +156,6 @@ def quit(device):
         onError(e)
 
 def setVolume(device, volume):
-    logger.info('setVolume - device: {}'.format(device))
-
     if not device:
         return
 
