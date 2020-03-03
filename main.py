@@ -27,14 +27,14 @@ castDevice = None
 deviceNamesToSetVolumeFor = None
 deviceToCastTo = None
 
-def stopAndQuitCasting():
+def stopAndQuitCasting(forceQuit=False):
     global castDevice
 
-    if castDevice is not None:
+    if not forceQuit and castDevice is not None:
         caster.stop(castDevice)
         caster.quit(castDevice)
 
-        castDevice = None
+    castDevice = None
 
 def playOrStop():
     global castDevice
@@ -160,9 +160,9 @@ def onFlicBluetoothControllerStateChange(state):
 
 def onCasterError(error=None):
     logger.error('Caster got error: {}'.format(error))
-    exit(1)
+    exit(1, forceQuitCaster=True)
 
-def exit(exitCode=0):
+def exit(exitCode=0, forceQuitCaster=False):
     logger.info('Stopping subprocesses...')
 
     if flicClient is not None:
@@ -184,7 +184,13 @@ def exit(exitCode=0):
 
     caster.cancelDeviceScanner()
 
-    stopAndQuitCasting()
+    if forceQuitCaster:
+        logger.info(
+            'Exit was called with caster force quit requested - '
+            'not calling caster’s stop+quit'
+        )
+
+    stopAndQuitCasting(forceQuit=forceQuitCaster)
 
     logger.info('Exiting with code {}'.format(exitCode))
 
