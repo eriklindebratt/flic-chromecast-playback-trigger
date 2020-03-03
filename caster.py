@@ -14,7 +14,7 @@ deviceHosts = []
 deviceHostScanTimer = None
 
 DEVICE_HOST_SCAN_TIMEOUT = 15
-CONTINUOUS_DEVICE_HOST_SCAN_INTERVAL = 5.0  # in seconds
+CONTINUOUS_DEVICE_HOST_SCAN_INTERVAL = 900.0  # in seconds
 
 def setup(errorHandler=None):
     global onError
