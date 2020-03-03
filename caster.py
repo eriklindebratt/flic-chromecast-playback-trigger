@@ -1,4 +1,3 @@
-import time
 import pychromecast
 from mimetypes import MimeTypes
 import logging
@@ -11,11 +10,11 @@ logging.getLogger('pychromecast').setLevel(logging.WARN)
 logger = logging.getLogger(__name__)
 
 onError = lambda error: None
-devices = []
-deviceScanTimer = None
+deviceHosts = []
+deviceHostScanTimer = None
 
-DEVICE_SCAN_ATTEMPTS_PER_SCAN = 2
-CONTINUOUS_DEVICE_SCAN_INTERVAL = 900.0  # in seconds
+DEVICE_HOST_SCAN_TIMEOUT = 15
+CONTINUOUS_DEVICE_HOST_SCAN_INTERVAL = 5.0  # in seconds
 
 def setup(errorHandler=None):
     global onError
@@ -25,85 +24,88 @@ def setup(errorHandler=None):
     if errorHandler is not None:
         onError = errorHandler
 
-    if not scanForDevices():
+    if not scanForDeviceHosts():
         logger.error('Setup completed with failing scanner')
     else:
         logger.info('Setup completed')
 
 
-def scanForDevices():
+def scanForDeviceHosts():
     '''
-    Returns: Bool Whether scanner returned any devices or not
+    Returns: Bool Whether scanner returned any device hosts or not
     '''
 
-    global devices, deviceScanTimer
+    global deviceHosts, deviceHostScanTimer
 
     # cancel currently running scanner, if any
-    cancelDeviceScanner()
+    cancelDeviceHostScanner()
 
-    logger.debug('Scanning for devices...')
+    logger.debug('Scanning for device hosts...')
 
     startTime = datetime.utcnow()
-    devices = pychromecast.get_chromecasts(tries=DEVICE_SCAN_ATTEMPTS_PER_SCAN)
+    #devices = pychromecast.get_chromecasts(tries=DEVICE_SCAN_ATTEMPTS_PER_SCAN)
+    deviceHosts = pychromecast.discover_chromecasts(
+        timeout=DEVICE_HOST_SCAN_TIMEOUT
+    )
 
     formattedScanTime = formatTimeDelta(datetime.utcnow() - startTime)
     formattedNextScanTimestamp = (
         datetime.utcnow() +
-        timedelta(seconds=CONTINUOUS_DEVICE_SCAN_INTERVAL)
+        timedelta(seconds=CONTINUOUS_DEVICE_HOST_SCAN_INTERVAL)
     ).isoformat()
 
-    gotAcceptableSetOfDevices = devices is not None and len(devices) > 0
+    gotAcceptableSetOfHosts = deviceHosts is not None and len(deviceHosts) > 0
 
-    if not gotAcceptableSetOfDevices:
+    if not gotAcceptableSetOfHosts:
         logger.error(
-            'Device scan completed with no device(s) found after {} '
-            '(max {} attempt(s)). Scheduling next scan for {}.'.format(
+            'Device host scan completed with no hosts found after {}. '
+            'Scheduling next scan for {}.'.format(
                 formattedScanTime,
-                DEVICE_SCAN_ATTEMPTS_PER_SCAN,
                 formattedNextScanTimestamp
             )
         )
 
-        cancelDeviceScanner()
+        cancelDeviceHostScanner()
         onError(
             Exception(
-                'Device scan completed with no device(s) found '
-                '(max {} attempt(s))'.format(DEVICE_SCAN_ATTEMPTS_PER_SCAN)
+                'Device host scan completed with no device(s) found.'.format(
+                    DEVICE_SCAN_ATTEMPTS_PER_SCAN
+                )
             )
         )
     else:
         logger.info(
-            'Device scan completed with {} device(s) found after {} '
-            '(max {} attempt(s)). Scheduling next scan for {}.'.format(
-                len(devices),
+            'Device scan completed with {} device(s) found after {}. '
+            'Scheduling next scan for {}.'.format(
+                len(deviceHosts),
                 formattedScanTime,
-                DEVICE_SCAN_ATTEMPTS_PER_SCAN,
                 formattedNextScanTimestamp
             )
         )
 
     # continue to scan every N seconds
-    deviceScanTimer = threading.Timer(
-        CONTINUOUS_DEVICE_SCAN_INTERVAL,
-        scanForDevices
+    deviceHostScanTimer = threading.Timer(
+        CONTINUOUS_DEVICE_HOST_SCAN_INTERVAL,
+        scanForDeviceHosts
     )
-    deviceScanTimer.start()
+    deviceHostScanTimer.start()
 
-    return gotAcceptableSetOfDevices
+    return gotAcceptableSetOfHosts
 
-def cancelDeviceScanner():
-    global deviceScanTimer
+def cancelDeviceHostScanner():
+    global deviceHostScanTimer
 
-    if deviceScanTimer is not None and deviceScanTimer.is_alive():
-        deviceScanTimer.cancel()
-        deviceScanTimer = None
+    if deviceHostScanTimer is not None and deviceHostScanTimer.is_alive():
+        deviceHostScanTimer.cancel()
+        deviceHostScanTimer = None
 
 def getDevice(deviceName, calledFromSelf=False):
     if not calledFromSelf:
         logger.debug('Getting device "{}"'.format(deviceName))
 
     try:
-        cast = next(cc for cc in devices if cc.device.friendly_name == deviceName)
+        host = next(i for i in deviceHosts if i[-1] == deviceName)
+        device = pychromecast.Chromecast(host[0], host[1])
     except StopIteration:
         if not calledFromSelf:
             logger.warn(
@@ -112,7 +114,7 @@ def getDevice(deviceName, calledFromSelf=False):
                 )
             )
 
-            scanForDevices()
+            scanForDeviceHosts()
 
             return getDevice(deviceName, calledFromSelf=True)
         else:
@@ -126,10 +128,12 @@ def getDevice(deviceName, calledFromSelf=False):
 
     # start worker thread and wait for cast device to be ready
     logger.debug('Device "{}" found, connecting...'.format(deviceName))
-    cast.wait()
+
+    device.wait()
+
     logger.debug('Connected to "{}"'.format(deviceName))
 
-    return cast
+    return device
 
 def stop(device):
     if not device:

@@ -182,7 +182,7 @@ def exit(exitCode=0, forceQuitCaster=False):
 
         flicClient.close()
 
-    caster.cancelDeviceScanner()
+    caster.cancelDeviceHostScanner()
 
     if forceQuitCaster:
         logger.info(
