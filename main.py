@@ -254,27 +254,27 @@ if __name__ == '__main__':
 
     caster.setup(errorHandler=onCasterError)
 
-    logger.info('ready')
-    input('press key...')
-    playOrStop()
-    while True:
-        pass
+    # logger.info('ready')
+    # input('press key...')
+    # playOrStop()
+    # while True:
+        # pass
 
-    # try:
-        # logger.info('Setting up Flic client')
+    try:
+        logger.info('Setting up Flic client')
 
-        # flicButtonConnectionChannels = []
+        flicButtonConnectionChannels = []
 
-        # flicClient = fliclib.FlicClient('localhost')
-        # flicClient.get_info(onFlicGetInfo)
-        # flicClient.on_new_verified_button = onFlicNewVerifiedButton
-        # flicClient.on_bluetooth_controller_state_change = onFlicBluetoothControllerStateChange
-    # except Exception as e:
-        # logger.error('Failed to start Flic client: {}'.format(e))
-        # exit(1)
+        flicClient = fliclib.FlicClient('localhost')
+        flicClient.get_info(onFlicGetInfo)
+        flicClient.on_new_verified_button = onFlicNewVerifiedButton
+        flicClient.on_bluetooth_controller_state_change = onFlicBluetoothControllerStateChange
+    except Exception as e:
+        logger.error('Failed to start Flic client: {}'.format(e))
+        exit(1)
 
-    # logger.info('Ready - waiting for button clicks...\n---')
+    logger.info('Ready - waiting for button clicks...\n---')
 
-    # # note that this method is blocking!
-    # flicClient.handle_events()
+    # note that this method is blocking!
+    flicClient.handle_events()
 
