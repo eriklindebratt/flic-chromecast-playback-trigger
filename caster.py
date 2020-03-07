@@ -1,4 +1,8 @@
 import pychromecast
+from pychromecast.controllers.media import (
+    MEDIA_PLAYER_STATE_IDLE,
+    MEDIA_PLAYER_STATE_UNKNOWN
+)
 from mimetypes import MimeTypes
 import logging
 import sys
@@ -15,6 +19,38 @@ deviceHostScanTimer = None
 
 DEVICE_HOST_SCAN_TIMEOUT = 15
 CONTINUOUS_DEVICE_HOST_SCAN_INTERVAL = 900.0  # in seconds
+
+class DeviceStatusListener:
+    def __init__(self, device, callback):
+        self.device = device
+        self.callback = callback
+
+    def new_cast_status(self, status):
+        logger.debug('Device "{}" got new device status: {}'.format(
+            self.device.name,
+            status
+        ))
+
+        self.callback(self.device, status)
+
+class DeviceMediaStatusListener:
+    def __init__(self, device, callback):
+        self.device = device
+        self.callback = callback
+        self.lastPlayerState = None
+
+    def new_media_status(self, status):
+        logger.debug('Device "{}" got new media status: {}'.format(
+            self.device.name,
+            status
+        ))
+
+        if self.lastPlayerState and self.lastPlayerState == status.player_state:
+            return
+
+        self.lastPlayerState = status.player_state
+
+        self.callback(self.device, status)
 
 def setup(errorHandler=None):
     global onError
@@ -43,7 +79,6 @@ def scanForDeviceHosts():
     logger.debug('Scanning for device hosts...')
 
     startTime = datetime.utcnow()
-    #devices = pychromecast.get_chromecasts(tries=DEVICE_SCAN_ATTEMPTS_PER_SCAN)
     deviceHosts = pychromecast.discover_chromecasts(
         timeout=DEVICE_HOST_SCAN_TIMEOUT
     )
@@ -135,7 +170,7 @@ def getDevice(deviceName, calledFromSelf=False):
 
     return device
 
-def stop(device):
+def stop(device, disconnectFromDevice=False):
     if not device:
         return
 
@@ -146,20 +181,41 @@ def stop(device):
     except pychromecast.error.ControllerNotRegistered as e:
         logger.error('Failed to stop: {}'.format(e))
         onError(e)
+        return
 
-def quit(device):
+    if disconnectFromDevice:
+        logger.info(
+            'Playback stopped on "{}" - disconnecting..'.format(device.name)
+        )
+        device.disconnect(blocking=False)
+
+def quit(device, disconnectFromDevice=False):
     if not device:
         return
 
-    logger.info('Closing Chromecast application "{}"'.format(device.name))
+    logger.info('Closing Chromecast application on "{}"'.format(device.name))
 
     try:
-        device.quit_app()
+        if device.app_id:
+            device.quit_app()
+        else:
+            logger.info(
+                ' - no Chromecast application active '
+                'on "{}"!'.format(device.name)
+            )
     except pychromecast.error.ControllerNotRegistered as e:
         logger.error('Failed to quit: {}'.format(e))
         onError(e)
+        return
 
-def setVolume(device, volume):
+    if disconnectFromDevice:
+        logger.info(
+            'Chromecast application is quit on "{}" '
+            '- disconnecting...'.format(device.name)
+        )
+        device.disconnect(blocking=False)
+
+def setVolume(device, volume, callback=None, disconnectFromDevice=False):
     if not device:
         return
 
@@ -175,8 +231,24 @@ def setVolume(device, volume):
     except pychromecast.error.ControllerNotRegistered as e:
         logger.error('Failed to set volume: {}'.format(e))
         onError(e)
+        return
+
+    if callback is not None:
+        logger.info(
+            'Volume set on "{}" - disconnecting...'.format(device.name)
+        )
+        device.disconnect()
+
+    if disconnectFromDevice:
+        logger.info(
+            'Volume set on "{}" - disconnecting...'.format(device.name)
+        )
+        device.disconnect()
 
 def isPlaying(device):
+    if not device:
+        return False
+
     try:
         return device.media_controller.is_playing
     except pychromecast.error.ControllerNotRegistered as e:
@@ -187,9 +259,6 @@ def isPlaying(device):
 def play(data, device=None):
     if data is None:
         data = {}
-
-    if not device and data.get('deviceName') is None:
-        raise Exception('Missing `data[\'deviceName\']`')
 
     ########################
     # set up media data structure
@@ -212,11 +281,6 @@ def play(data, device=None):
         )
     ########################
 
-    if not device:
-        device = getDevice(data['deviceName'])
-        if not device:
-            raise Exception('Failed to get device "{}"'.format(data['deviceName']))
-
     if data.get('volume') is not None:
         setVolume(device, data['volume'])
 
@@ -230,3 +294,12 @@ def play(data, device=None):
 
     return device
 
+def addDeviceStatusListener(device, callback):
+    device.media_controller.register_status_listener(
+        DeviceStatusListener(device, callback)
+    )
+
+def addDevicePlayerStatusListener(device, callback):
+    device.media_controller.register_status_listener(
+        DeviceMediaStatusListener(device, callback)
+    )
