@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+
+import caster
+from argparse import ArgumentParser
+import logging
+import sys
+import signal
+import os
+from http.server import HTTPServer, SimpleHTTPRequestHandler
+import threading
+
+for handler in logging.root.handlers[:]:
+    logging.root.removeHandler(handler)
+logging.basicConfig(
+    stream=sys.stdout,
+    level=logging.INFO,
+    format='%(levelname)s:%(name)s:%(asctime)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S %z'
+)
+logging.getLogger('urllib3').setLevel(logging.INFO)
+
+logger = None
+castDevice = None
+httpServer = None
+httpServerThread = None
+
+def start_web_server(port=8000, root=None):
+    global httpServer, httpServerThread
+
+    logger.info('Starting web server on port {}...'.format(port))
+
+    if root:
+        os.chdir(os.path.expanduser(root))
+
+    httpServer = HTTPServer(('', port), SimpleHTTPRequestHandler)
+    httpServerThread = threading.Thread(
+        target = httpServer.serve_forever
+    )
+    httpServerThread.daemon = True
+    httpServerThread.start()
+
+def stop_web_server():
+    global httpServer
+
+    if not httpServer:
+        return
+
+    logger.info('Stopping web server...')
+
+    httpServer.shutdown()
+    httpServer.server_close()
+    httpServer = None
+
+def onCasterError(error=None):
+    logger.error('Caster got error: {}'.format(error))
+    exit(1, forceQuitCaster=True)
+
+def stopAndQuitCasting(device, forceQuit=False):
+    global castDevice
+
+    if not device:
+        logger.warning('`device` was None or invalid')
+        return
+
+    castDevice = None
+
+    if not forceQuit:
+        try:
+            if caster.isPlaying(device):
+                caster.stop(device)
+
+            caster.quit(device, disconnectFromDevice=True)
+        except Exception as e:
+            logger.error('ERR: {}'.format(e))
+
+def exit(exitCode=0, forceQuitCaster=False):
+    global castDevice
+
+    logger.info('Stopping subprocesses...')
+
+    stop_web_server()
+
+    caster.cancelDeviceHostScanner()
+
+    if forceQuitCaster:
+        logger.info(
+            'Exit was called with caster force quit requested - '
+            'not calling caster’s stop+quit'
+        )
+
+    stopAndQuitCasting(castDevice, forceQuit=forceQuitCaster)
+
+    castDevice = None
+
+    logger.info('Exiting with code {}'.format(exitCode))
+
+    sys.exit(exitCode)
+
+def onSIGINT(*args):
+    logger.info('Received SIGINT')
+    exit(0)
+
+def onSIGTERM(*args):
+    logger.info('Received SIGTERM')
+    exit(0)
+
+def collectArgs():
+    argParser = ArgumentParser(description='Play a media file on a Chromecast device')
+    argParser._action_groups.pop()
+
+    requiredArgs = argParser.add_argument_group('required arguments')
+    requiredArgs.add_argument(
+        '--device',
+        '-d',
+        type=str,
+        help='Name of the Chromecast device to cast to',
+        required=True
+    )
+    requiredArgs.add_argument(
+        '--url',
+        '-u',
+        type=str,
+        help='URL to the media file to be played',
+        required=True
+    )
+
+    optionalArgs = argParser.add_argument_group('optional arguments')
+    optionalArgs.add_argument(
+        '--serve_port',
+        '-p',
+        type=int,
+        default=8000,
+        help='Port to use for serving local files'
+    )
+
+    args = argParser.parse_args()
+
+if __name__ == '__main__':
+    logger = logging.getLogger(__name__)
+
+    args = collectArgs()
+
+    start_web_server(port=args.serve_port)
+
+    signal.signal(signal.SIGINT, onSIGINT)
+    signal.signal(signal.SIGTERM, onSIGTERM)
+
+    caster.setup(errorHandler=onCasterError)
+
+    if not args.url.startswith('http://') and not args.url.startswith('https://'):
+        web_url = ''  # TODO
+    else:
+        web_url = args.url
+
+    # castDevice = caster.play({
+        # 'media': {
+            # 'url': web_url,
+            # 'args': {
+                # 'autoplay': True
+            # }
+        # }
+    # }, caster.getDevice(args.device))
+
+    # if not castDevice:
+        # exit(0)
+
+    while True:
+        pass
