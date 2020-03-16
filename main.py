@@ -27,14 +27,14 @@ castDevice = None
 deviceNamesToSetVolumeFor = None
 deviceToCastTo = None
 
-def stopAndQuitCasting(forceQuit=False):
-    global castDevice
-
-    if not forceQuit and castDevice is not None:
-        caster.stop(castDevice)
-        caster.quit(castDevice)
-
+def stopAndQuitCasting(device, forceQuit=False):
     castDevice = None
+
+    if not forceQuit:
+        if caster.isPlaying(device):
+            caster.stop(device)
+
+        caster.quit(device, disconnectFromDevice=True)
 
 def playOrStop():
     global castDevice
@@ -47,7 +47,7 @@ def playOrStop():
 
     if castDevice is not None and caster.isPlaying(castDevice):
         logger.info('Currently playing - stopping')
-        stopAndQuitCasting()
+        stopAndQuitCasting(castDevice)
     else:
         ########################
         # setting device volumes
@@ -63,15 +63,25 @@ def playOrStop():
                 ]
             ]
 
+            # def onDeviceVolumeSet(device):
+                # logger.info(
+                    # 'Volume set on "{}" - disconnecting...'.format(device.name)
+                # )
+                # device.disconnect(blocking=False)
+
             if devicesToSetVolumeFor is not None:
                 [caster.setVolume(
                     i['device'],
-                    i['volume']
+                    i['volume']#,
+                    # callback=onDeviceVolumeSet
+                ) for i in devicesToSetVolumeFor]
+
+                [i['device'].disconnect(
+                    blocking=False
                 ) for i in devicesToSetVolumeFor]
         ########################
 
         castDevice = caster.play({
-            'deviceName': deviceToCastTo,
             'media': {
                 'url': 'https://sverigesradio.se/topsy/direkt/srapi/132.mp3',
                 'args': {
@@ -81,8 +91,35 @@ def playOrStop():
                     'thumb': 'https://static-cdn.sr.se/sida/images/132/2186745_512_512.jpg?preset=api-default-square'
                 }
             }
-        }, castDevice)
+        }, caster.getDevice(deviceToCastTo))
 
+        if not castDevice:
+            return
+
+        def onDevicePlayerStatus(device, status):
+            global castDevice
+
+            if not castDevice:
+                logger.info(
+                    'Got device media status "{}" while `castDevice` '
+                    'was `None`: {}'.format(status)
+                )
+                return
+
+            logger.info(
+                'Got device media player state "{}"'.format(
+                    status.player_state
+                )
+            )
+
+            if status.player_state == caster.MEDIA_PLAYER_STATE_IDLE or \
+                status.player_state == caster.MEDIA_PLAYER_STATE_UNKNOWN:
+                stopAndQuitCasting(device)
+
+        caster.addDevicePlayerStatusListener(
+            castDevice,
+            onDevicePlayerStatus
+        )
 
 def onFlicButtonClickOrHold(channel, clickType, wasQueued, timeDiff):
     if clickType != fliclib.ClickType.ButtonClick:
@@ -163,6 +200,8 @@ def onCasterError(error=None):
     exit(1, forceQuitCaster=True)
 
 def exit(exitCode=0, forceQuitCaster=False):
+    global castDevice
+
     logger.info('Stopping subprocesses...')
 
     if flicClient is not None:
@@ -182,7 +221,7 @@ def exit(exitCode=0, forceQuitCaster=False):
 
         flicClient.close()
 
-    caster.cancelDeviceScanner()
+    caster.cancelDeviceHostScanner()
 
     if forceQuitCaster:
         logger.info(
@@ -190,7 +229,7 @@ def exit(exitCode=0, forceQuitCaster=False):
             'not calling caster’s stop+quit'
         )
 
-    stopAndQuitCasting(forceQuit=forceQuitCaster)
+    stopAndQuitCasting(castDevice, forceQuit=forceQuitCaster)
 
     logger.info('Exiting with code {}'.format(exitCode))
 
@@ -214,6 +253,12 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, onSIGTERM)
 
     caster.setup(errorHandler=onCasterError)
+
+    # logger.info('ready')
+    # input('press key...')
+    # playOrStop()
+    # while True:
+        # pass
 
     try:
         logger.info('Setting up Flic client')

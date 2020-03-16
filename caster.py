@@ -1,5 +1,8 @@
-import time
 import pychromecast
+from pychromecast.controllers.media import (
+    MEDIA_PLAYER_STATE_IDLE,
+    MEDIA_PLAYER_STATE_UNKNOWN
+)
 from mimetypes import MimeTypes
 import logging
 import sys
@@ -11,11 +14,43 @@ logging.getLogger('pychromecast').setLevel(logging.WARN)
 logger = logging.getLogger(__name__)
 
 onError = lambda error: None
-devices = []
-deviceScanTimer = None
+deviceHosts = []
+deviceHostScanTimer = None
 
-DEVICE_SCAN_ATTEMPTS_PER_SCAN = 2
-CONTINUOUS_DEVICE_SCAN_INTERVAL = 900.0  # in seconds
+DEVICE_HOST_SCAN_TIMEOUT = 15
+CONTINUOUS_DEVICE_HOST_SCAN_INTERVAL = 900.0  # in seconds
+
+class DeviceStatusListener:
+    def __init__(self, device, callback):
+        self.device = device
+        self.callback = callback
+
+    def new_cast_status(self, status):
+        logger.debug('Device "{}" got new device status: {}'.format(
+            self.device.name,
+            status
+        ))
+
+        self.callback(self.device, status)
+
+class DeviceMediaStatusListener:
+    def __init__(self, device, callback):
+        self.device = device
+        self.callback = callback
+        self.lastPlayerState = None
+
+    def new_media_status(self, status):
+        logger.debug('Device "{}" got new media status: {}'.format(
+            self.device.name,
+            status
+        ))
+
+        if self.lastPlayerState and self.lastPlayerState == status.player_state:
+            return
+
+        self.lastPlayerState = status.player_state
+
+        self.callback(self.device, status)
 
 def setup(errorHandler=None):
     global onError
@@ -25,85 +60,87 @@ def setup(errorHandler=None):
     if errorHandler is not None:
         onError = errorHandler
 
-    if not scanForDevices():
+    if not scanForDeviceHosts():
         logger.error('Setup completed with failing scanner')
     else:
         logger.info('Setup completed')
 
 
-def scanForDevices():
+def scanForDeviceHosts():
     '''
-    Returns: Bool Whether scanner returned any devices or not
+    Returns: Bool Whether scanner returned any device hosts or not
     '''
 
-    global devices, deviceScanTimer
+    global deviceHosts, deviceHostScanTimer
 
     # cancel currently running scanner, if any
-    cancelDeviceScanner()
+    cancelDeviceHostScanner()
 
-    logger.debug('Scanning for devices...')
+    logger.debug('Scanning for device hosts...')
 
     startTime = datetime.utcnow()
-    devices = pychromecast.get_chromecasts(tries=DEVICE_SCAN_ATTEMPTS_PER_SCAN)
+    deviceHosts = pychromecast.discover_chromecasts(
+        timeout=DEVICE_HOST_SCAN_TIMEOUT
+    )
 
     formattedScanTime = formatTimeDelta(datetime.utcnow() - startTime)
     formattedNextScanTimestamp = (
         datetime.utcnow() +
-        timedelta(seconds=CONTINUOUS_DEVICE_SCAN_INTERVAL)
+        timedelta(seconds=CONTINUOUS_DEVICE_HOST_SCAN_INTERVAL)
     ).isoformat()
 
-    gotAcceptableSetOfDevices = devices is not None and len(devices) > 0
+    gotAcceptableSetOfHosts = deviceHosts is not None and len(deviceHosts) > 0
 
-    if not gotAcceptableSetOfDevices:
+    if not gotAcceptableSetOfHosts:
         logger.error(
-            'Device scan completed with no device(s) found after {} '
-            '(max {} attempt(s)). Scheduling next scan for {}.'.format(
+            'Device host scan completed with no hosts found after {}. '
+            'Scheduling next scan for {}.'.format(
                 formattedScanTime,
-                DEVICE_SCAN_ATTEMPTS_PER_SCAN,
                 formattedNextScanTimestamp
             )
         )
 
-        cancelDeviceScanner()
+        cancelDeviceHostScanner()
         onError(
             Exception(
-                'Device scan completed with no device(s) found '
-                '(max {} attempt(s))'.format(DEVICE_SCAN_ATTEMPTS_PER_SCAN)
+                'Device host scan completed with no device(s) found.'.format(
+                    DEVICE_SCAN_ATTEMPTS_PER_SCAN
+                )
             )
         )
     else:
         logger.info(
-            'Device scan completed with {} device(s) found after {} '
-            '(max {} attempt(s)). Scheduling next scan for {}.'.format(
-                len(devices),
+            'Device scan completed with {} device(s) found after {}. '
+            'Scheduling next scan for {}.'.format(
+                len(deviceHosts),
                 formattedScanTime,
-                DEVICE_SCAN_ATTEMPTS_PER_SCAN,
                 formattedNextScanTimestamp
             )
         )
 
     # continue to scan every N seconds
-    deviceScanTimer = threading.Timer(
-        CONTINUOUS_DEVICE_SCAN_INTERVAL,
-        scanForDevices
+    deviceHostScanTimer = threading.Timer(
+        CONTINUOUS_DEVICE_HOST_SCAN_INTERVAL,
+        scanForDeviceHosts
     )
-    deviceScanTimer.start()
+    deviceHostScanTimer.start()
 
-    return gotAcceptableSetOfDevices
+    return gotAcceptableSetOfHosts
 
-def cancelDeviceScanner():
-    global deviceScanTimer
+def cancelDeviceHostScanner():
+    global deviceHostScanTimer
 
-    if deviceScanTimer is not None and deviceScanTimer.is_alive():
-        deviceScanTimer.cancel()
-        deviceScanTimer = None
+    if deviceHostScanTimer is not None and deviceHostScanTimer.is_alive():
+        deviceHostScanTimer.cancel()
+        deviceHostScanTimer = None
 
 def getDevice(deviceName, calledFromSelf=False):
     if not calledFromSelf:
         logger.debug('Getting device "{}"'.format(deviceName))
 
     try:
-        cast = next(cc for cc in devices if cc.device.friendly_name == deviceName)
+        host = next(i for i in deviceHosts if i[-1] == deviceName)
+        device = pychromecast.Chromecast(host[0], host[1])
     except StopIteration:
         if not calledFromSelf:
             logger.warn(
@@ -112,7 +149,7 @@ def getDevice(deviceName, calledFromSelf=False):
                 )
             )
 
-            scanForDevices()
+            scanForDeviceHosts()
 
             return getDevice(deviceName, calledFromSelf=True)
         else:
@@ -126,12 +163,14 @@ def getDevice(deviceName, calledFromSelf=False):
 
     # start worker thread and wait for cast device to be ready
     logger.debug('Device "{}" found, connecting...'.format(deviceName))
-    cast.wait()
+
+    device.wait()
+
     logger.debug('Connected to "{}"'.format(deviceName))
 
-    return cast
+    return device
 
-def stop(device):
+def stop(device, disconnectFromDevice=False):
     if not device:
         return
 
@@ -142,20 +181,41 @@ def stop(device):
     except pychromecast.error.ControllerNotRegistered as e:
         logger.error('Failed to stop: {}'.format(e))
         onError(e)
+        return
 
-def quit(device):
+    if disconnectFromDevice:
+        logger.info(
+            'Playback stopped on "{}" - disconnecting..'.format(device.name)
+        )
+        device.disconnect(blocking=False)
+
+def quit(device, disconnectFromDevice=False):
     if not device:
         return
 
-    logger.info('Closing Chromecast application "{}"'.format(device.name))
+    logger.info('Closing Chromecast application on "{}"'.format(device.name))
 
     try:
-        device.quit_app()
+        if device.app_id:
+            device.quit_app()
+        else:
+            logger.info(
+                ' - no Chromecast application active '
+                'on "{}"!'.format(device.name)
+            )
     except pychromecast.error.ControllerNotRegistered as e:
         logger.error('Failed to quit: {}'.format(e))
         onError(e)
+        return
 
-def setVolume(device, volume):
+    if disconnectFromDevice:
+        logger.info(
+            'Chromecast application is quit on "{}" '
+            '- disconnecting...'.format(device.name)
+        )
+        device.disconnect(blocking=False)
+
+def setVolume(device, volume, callback=None, disconnectFromDevice=False):
     if not device:
         return
 
@@ -171,8 +231,24 @@ def setVolume(device, volume):
     except pychromecast.error.ControllerNotRegistered as e:
         logger.error('Failed to set volume: {}'.format(e))
         onError(e)
+        return
+
+    if callback is not None:
+        logger.info(
+            'Volume set on "{}" - disconnecting...'.format(device.name)
+        )
+        device.disconnect()
+
+    if disconnectFromDevice:
+        logger.info(
+            'Volume set on "{}" - disconnecting...'.format(device.name)
+        )
+        device.disconnect()
 
 def isPlaying(device):
+    if not device:
+        return False
+
     try:
         return device.media_controller.is_playing
     except pychromecast.error.ControllerNotRegistered as e:
@@ -183,9 +259,6 @@ def isPlaying(device):
 def play(data, device=None):
     if data is None:
         data = {}
-
-    if not device and data.get('deviceName') is None:
-        raise Exception('Missing `data[\'deviceName\']`')
 
     ########################
     # set up media data structure
@@ -208,11 +281,6 @@ def play(data, device=None):
         )
     ########################
 
-    if not device:
-        device = getDevice(data['deviceName'])
-        if not device:
-            raise Exception('Failed to get device "{}"'.format(data['deviceName']))
-
     if data.get('volume') is not None:
         setVolume(device, data['volume'])
 
@@ -226,3 +294,12 @@ def play(data, device=None):
 
     return device
 
+def addDeviceStatusListener(device, callback):
+    device.media_controller.register_status_listener(
+        DeviceStatusListener(device, callback)
+    )
+
+def addDevicePlayerStatusListener(device, callback):
+    device.media_controller.register_status_listener(
+        DeviceMediaStatusListener(device, callback)
+    )
