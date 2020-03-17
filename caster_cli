@@ -18,7 +18,7 @@ for handler in logging.root.handlers[:]:
     logging.root.removeHandler(handler)
 logging.basicConfig(
     stream=sys.stdout,
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(levelname)s:%(name)s:%(asctime)s: %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S %z'
 )
@@ -188,7 +188,8 @@ def main():
         'media': {
             'url': resolvedUrl,
             'args': {
-                'autoplay': True
+                'autoplay': True,
+                'title': os.path.basename(resolvedUrl)
             }
         },
         'volume': args.deviceVolume
