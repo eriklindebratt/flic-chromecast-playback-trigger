@@ -29,6 +29,13 @@ castDevice = None
 httpServer = None
 httpServerThread = None
 
+class HttpRequestHandler(SimpleHTTPRequestHandler):
+    def handle(self):
+        try:
+            SimpleHTTPRequestHandler.handle(self)
+        except BrokenPipeError:
+            pass
+
 
 def startWebServer(port, root=None):
     global httpServer, httpServerThread
@@ -41,7 +48,7 @@ def startWebServer(port, root=None):
     else:
         logger.info('Starting web server on port {}...'.format(port))
 
-    httpServer = HTTPServer(('', port), SimpleHTTPRequestHandler)
+    httpServer = HTTPServer(('', port), HttpRequestHandler)
     httpServerThread = threading.Thread(target=httpServer.serve_forever)
     httpServerThread.daemon = True
     httpServerThread.start()
@@ -82,8 +89,6 @@ def exit(exitCode=0, forceQuitCaster=False):
 
     logger.info('Stopping subprocesses...')
 
-    stopWebServer()
-
     caster.cancelDeviceHostScanner()
 
     if forceQuitCaster:
@@ -95,6 +100,8 @@ def exit(exitCode=0, forceQuitCaster=False):
     stopAndQuitCasting(castDevice, forceQuit=forceQuitCaster)
 
     castDevice = None
+
+    stopWebServer()
 
     logger.info('Exiting with code {}'.format(exitCode))
 
