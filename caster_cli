@@ -33,7 +33,7 @@ class HttpRequestHandler(SimpleHTTPRequestHandler):
     def handle(self):
         try:
             SimpleHTTPRequestHandler.handle(self)
-        except BrokenPipeError:
+        except (BrokenPipeError, ConnectionResetError):
             pass
 
 
