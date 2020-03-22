@@ -11,7 +11,7 @@ for handler in logging.root.handlers[:]:
     logging.root.removeHandler(handler)
 logging.basicConfig(
     stream=sys.stdout,
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(levelname)s:%(name)s:%(asctime)s: %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S %z'
 )
