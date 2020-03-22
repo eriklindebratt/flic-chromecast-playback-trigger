@@ -39,48 +39,10 @@ def stopAndQuitCasting(device, forceQuit=False):
 def playOrStop():
     global castDevice
 
-    if deviceToCastTo is None:
-        logger.error(
-            'Can\'t play or stop - no target device configured in env vars'
-        )
-        return
-
     if castDevice is not None and caster.isPlaying(castDevice):
         logger.info('Currently playing - stopping')
         stopAndQuitCasting(castDevice)
     else:
-        ########################
-        # setting device volumes
-        if deviceNamesToSetVolumeFor is not None:
-            devicesToSetVolumeFor = [
-                {
-                    'device': caster.getDevice(a[0]),
-                    'volume': float(a[1])
-                } for a in [
-                    [
-                        n.strip() for n in i.strip().split('=')
-                    ] for i in deviceNamesToSetVolumeFor.split(',')
-                ]
-            ]
-
-            # def onDeviceVolumeSet(device):
-                # logger.info(
-                    # 'Volume set on "{}" - disconnecting...'.format(device.name)
-                # )
-                # device.disconnect(blocking=False)
-
-            if devicesToSetVolumeFor is not None:
-                [caster.setVolume(
-                    i['device'],
-                    i['volume']#,
-                    # callback=onDeviceVolumeSet
-                ) for i in devicesToSetVolumeFor]
-
-                [i['device'].disconnect(
-                    blocking=False
-                ) for i in devicesToSetVolumeFor]
-        ########################
-
         castDevice = caster.play({
             'media': {
                 'url': 'https://sverigesradio.se/topsy/direkt/srapi/132.mp3',
@@ -120,6 +82,31 @@ def playOrStop():
             castDevice,
             onDevicePlayerStatus
         )
+
+        ########################
+        # setting device volumes
+        if deviceNamesToSetVolumeFor is not None:
+            devicesToSetVolumeFor = [
+                {
+                    'device': caster.getDevice(a[0]),
+                    'volume': float(a[1])
+                } for a in [
+                    [
+                        n.strip() for n in i.strip().split('=')
+                    ] for i in deviceNamesToSetVolumeFor.split(',')
+                ]
+            ]
+
+            if devicesToSetVolumeFor is not None:
+                [caster.setVolume(
+                    i['device'],
+                    i['volume']
+                ) for i in devicesToSetVolumeFor]
+
+                [i['device'].disconnect(
+                    blocking=False
+                ) for i in devicesToSetVolumeFor]
+        ########################
 
 def onFlicButtonClickOrHold(channel, clickType, wasQueued, timeDiff):
     if clickType != fliclib.ClickType.ButtonClick:
@@ -248,6 +235,10 @@ if __name__ == '__main__':
 
     deviceNamesToSetVolumeFor = os.environ.get('DEVICES_TO_SET_VOLUME_FOR')
     deviceToCastTo = os.environ.get('DEVICE_TO_CAST_TO')
+
+    if not deviceToCastTo:
+        logger.error('No target device specified in env vars')
+        sys.exit(1)
 
     signal.signal(signal.SIGINT, onSIGINT)
     signal.signal(signal.SIGTERM, onSIGTERM)
