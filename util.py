@@ -1,4 +1,6 @@
 import socket
+import psutil
+import os
 
 def formatTimeDelta(delta):
     hours, remainder = divmod(delta.seconds, 3600)
@@ -21,3 +23,29 @@ def getLocalIpAddress():
 
     return ipAddress
 
+
+def getProcessesByName(processNames, args=None):
+    processes = []
+
+    for proc in psutil.process_iter():
+        try:
+            if proc.pid == os.getpid():
+                continue
+
+            procName = proc.name()
+            procArgs = ' '.join(proc.cmdline()[1:])
+
+            if proc.name() in processNames:
+                if args:
+                    if args in procArgs:
+                        processes.append(proc)
+                else:
+                    processes.append(proc)
+        except (
+            IndexError,
+            psutil.NoSuchProcess,
+            psutil.AccessDenied,
+            psutil.ZombieProcess
+        ): pass
+
+    return processes

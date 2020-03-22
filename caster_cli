@@ -11,8 +11,9 @@ import random
 import tempfile
 import threading
 import re
-from util import getLocalIpAddress
+from util import getLocalIpAddress, getProcessesByName
 from time import sleep
+import psutil
 
 for handler in logging.root.handlers[:]:
     logging.root.removeHandler(handler)
@@ -103,6 +104,9 @@ def exit(exitCode=0, forceQuitCaster=False):
 
     stopWebServer()
 
+    logger.info('debug waiting...')
+    sleep(10)
+
     logger.info('Exiting with code {}'.format(exitCode))
 
     sys.exit(exitCode)
@@ -124,15 +128,13 @@ def collectArgs():
         '--device',
         '-d',
         type=str,
-        help='Name of the Chromecast device to cast to',
-        required=True
+        help='Name of the Chromecast device to cast to'
     )
     requiredArgs.add_argument(
         '--url',
         '-u',
         type=str,
-        help='URL to the media file to be played',
-        required=True
+        help='URL to the media file to be played'
     )
 
     optionalArgs = argParser.add_argument_group('optional arguments')
@@ -149,19 +151,51 @@ def collectArgs():
         type=float,
         help='Volume (0.0-1.0) to set on Chromecast device'
     )
+    optionalArgs.add_argument(
+        '--quit',
+        '-q',
+        action='store_true',
+        help='Pass to quit an already running process'
+    )
 
     args = argParser.parse_args()
 
-    if not args.url.startswith('https://') and re.match('^[a-z]+:\/\/', args.url):
-        argParser.error(
-            'URL must either be an HTTPS URL or '
-            'a path to a local file.'
-        )
+    if not args.quit:
+        if not args.device or not args.url:
+            argParser.print_usage()
+            sys.exit(1)
 
-    if args.deviceVolume and (args.deviceVolume < 0.0 or args.deviceVolume > 1.0):
-        argParser.error('Device volume must be between 0.0 and 1.0.')
+        if not args.url.startswith('https://') and re.match('^[a-z]+:\/\/', args.url):
+            argParser.error(
+                'URL must either be an HTTPS URL or '
+                'a path to a local file.'
+            )
+
+        if args.deviceVolume and (args.deviceVolume < 0.0 or args.deviceVolume > 1.0):
+            argParser.error('Device volume must be between 0.0 and 1.0.')
 
     return args
+
+def quitProcesses(processes):
+    if not processes:
+        logger.info('No processes found')
+
+    logger.info(
+        'Stopping {} running process(es)...'.format(len(processes))
+    )
+
+    timeout = 5
+
+    _, alive = psutil.wait_procs(processes, timeout=timeout)
+
+    if alive:
+        logger.info(
+            'Timeout reached - killing {} running process(es) '
+            'still running...'.format(len(alive))
+        )
+
+        for p in alive:
+            p.kill()
 
 def main():
     global logger, castDevice
@@ -172,6 +206,13 @@ def main():
     signal.signal(signal.SIGTERM, onSIGTERM)
 
     args = collectArgs()
+
+    if args.quit:
+        quitProcesses(getProcessesByName(
+            ['python3', 'python'],
+            sys.argv[0]
+        ))
+        return
 
     caster.setup(errorHandler=onCasterError)
 
@@ -204,6 +245,31 @@ def main():
 
     if not castDevice:
         exit(0)
+
+    def onDevicePlayerStatus(device, status):
+        global castDevice
+
+        if not castDevice:
+            logger.debug(
+                'Got device media player state "{}" while `castDevice` '
+                'was `None`'.format(status.player_state)
+            )
+            return
+
+        logger.info(
+            'Got device media player state "{}"'.format(
+                status.player_state
+            )
+        )
+
+        if status.player_state == caster.MEDIA_PLAYER_STATE_IDLE or \
+            status.player_state == caster.MEDIA_PLAYER_STATE_UNKNOWN:
+            stopAndQuitCasting(device)
+
+    caster.addDevicePlayerStatusListener(
+        castDevice,
+        onDevicePlayerStatus
+    )
 
     while True:
         sleep(10)

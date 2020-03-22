@@ -11,7 +11,7 @@ for handler in logging.root.handlers[:]:
     logging.root.removeHandler(handler)
 logging.basicConfig(
     stream=sys.stdout,
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(levelname)s:%(name)s:%(asctime)s: %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S %z'
 )
@@ -100,9 +100,9 @@ def playOrStop():
             global castDevice
 
             if not castDevice:
-                logger.info(
-                    'Got device media status "{}" while `castDevice` '
-                    'was `None`: {}'.format(status)
+                logger.debug(
+                    'Got device media player state "{}" while `castDevice` '
+                    'was `None`'.format(status.player_state)
                 )
                 return
 
