@@ -123,6 +123,7 @@ def scanForDeviceHosts():
         CONTINUOUS_DEVICE_HOST_SCAN_INTERVAL,
         scanForDeviceHosts
     )
+    deviceHostScanTimer.daemon = True
     deviceHostScanTimer.start()
 
     return gotAcceptableSetOfHosts
@@ -131,6 +132,7 @@ def cancelDeviceHostScanner():
     global deviceHostScanTimer
 
     if deviceHostScanTimer is not None and deviceHostScanTimer.is_alive():
+        logger.debug('Canceling device host scanner')
         deviceHostScanTimer.cancel()
         deviceHostScanTimer = None
 

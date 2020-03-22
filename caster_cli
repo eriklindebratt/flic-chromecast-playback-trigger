@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+
+import caster
+from argparse import ArgumentParser
+import logging
+import sys
+import signal
+import os
+from http.server import HTTPServer, SimpleHTTPRequestHandler
+import random
+import tempfile
+import threading
+import re
+from util import getLocalIpAddress, getProcessesByName
+from time import sleep
+import psutil
+
+for handler in logging.root.handlers[:]:
+    logging.root.removeHandler(handler)
+logging.basicConfig(
+    stream=sys.stdout,
+    level=logging.INFO,
+    format='%(levelname)s:%(name)s:%(asctime)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S %z'
+)
+logging.getLogger('urllib3').setLevel(logging.INFO)
+
+logger = None
+castDevice = None
+httpServer = None
+httpServerThread = None
+
+class HttpRequestHandler(SimpleHTTPRequestHandler):
+    def handle(self):
+        try:
+            SimpleHTTPRequestHandler.handle(self)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+
+def startWebServer(port, root=None):
+    global httpServer, httpServerThread
+
+    if root:
+        logger.info(
+            'Starting web server with root {} on port {}...'.format(root, port)
+        )
+        os.chdir(root)
+    else:
+        logger.info('Starting web server on port {}...'.format(port))
+
+    httpServer = HTTPServer(('', port), HttpRequestHandler)
+    httpServerThread = threading.Thread(target=httpServer.serve_forever)
+    httpServerThread.daemon = True
+    httpServerThread.start()
+
+def stopWebServer():
+    global httpServer
+
+    if not httpServer:
+        return
+
+    logger.info('Stopping web server...')
+
+    httpServer.shutdown()
+    httpServer.server_close()
+    httpServer = None
+
+def onCasterError(error=None):
+    logger.error('Caster got error: {}'.format(error))
+    exit(1, forceQuitCaster=True)
+
+def stopAndQuitCasting(device, forceQuit=False):
+    global castDevice
+
+    if not device:
+        logger.warning('`device` was None or invalid')
+        return
+
+    castDevice = None
+
+    if not forceQuit:
+        if caster.isPlaying(device):
+            caster.stop(device)
+
+        caster.quit(device, disconnectFromDevice=True)
+
+def exit(exitCode=0, forceQuitCaster=False):
+    global castDevice
+
+    logger.info('Stopping subprocesses...')
+
+    caster.cancelDeviceHostScanner()
+
+    if forceQuitCaster:
+        logger.info(
+            'Exit was called with caster force quit requested - '
+            'not calling caster’s stop+quit'
+        )
+
+    stopAndQuitCasting(castDevice, forceQuit=forceQuitCaster)
+
+    castDevice = None
+
+    stopWebServer()
+
+    logger.info('debug waiting...')
+    sleep(10)
+
+    logger.info('Exiting with code {}'.format(exitCode))
+
+    sys.exit(exitCode)
+
+def onSIGINT(*args):
+    logger.info('Received SIGINT')
+    exit(0)
+
+def onSIGTERM(*args):
+    logger.info('Received SIGTERM')
+    exit(0)
+
+def collectArgs():
+    argParser = ArgumentParser(description='Play a media file on a Chromecast device')
+    argParser._action_groups.pop()
+
+    requiredArgs = argParser.add_argument_group('required arguments')
+    requiredArgs.add_argument(
+        '--device',
+        '-d',
+        type=str,
+        help='Name of the Chromecast device to cast to'
+    )
+    requiredArgs.add_argument(
+        '--url',
+        '-u',
+        type=str,
+        help='URL to the media file to be played'
+    )
+
+    optionalArgs = argParser.add_argument_group('optional arguments')
+    optionalArgs.add_argument(
+        '--servePort',
+        '-p',
+        type=int,
+        default=8000,
+        help='Port to use for serving local files'
+    )
+    optionalArgs.add_argument(
+        '--deviceVolume',
+        '-v',
+        type=float,
+        help='Volume (0.0-1.0) to set on Chromecast device'
+    )
+    optionalArgs.add_argument(
+        '--quit',
+        '-q',
+        action='store_true',
+        help='Pass to quit an already running process'
+    )
+
+    args = argParser.parse_args()
+
+    if not args.quit:
+        if not args.device or not args.url:
+            argParser.print_usage()
+            sys.exit(1)
+
+        if not args.url.startswith('https://') and re.match('^[a-z]+:\/\/', args.url):
+            argParser.error(
+                'URL must either be an HTTPS URL or '
+                'a path to a local file.'
+            )
+
+        if args.deviceVolume and (args.deviceVolume < 0.0 or args.deviceVolume > 1.0):
+            argParser.error('Device volume must be between 0.0 and 1.0.')
+
+    return args
+
+def quitProcesses(processes):
+    if not processes:
+        logger.info('No processes found')
+
+    logger.info(
+        'Stopping {} running process(es)...'.format(len(processes))
+    )
+
+    timeout = 5
+
+    _, alive = psutil.wait_procs(processes, timeout=timeout)
+
+    if alive:
+        logger.info(
+            'Timeout reached - killing {} running process(es) '
+            'still running...'.format(len(alive))
+        )
+
+        for p in alive:
+            p.kill()
+
+def main():
+    global logger, castDevice
+
+    logger = logging.getLogger(__name__)
+
+    signal.signal(signal.SIGINT, onSIGINT)
+    signal.signal(signal.SIGTERM, onSIGTERM)
+
+    args = collectArgs()
+
+    if args.quit:
+        quitProcesses(getProcessesByName(
+            ['python3', 'python'],
+            sys.argv[0]
+        ))
+        return
+
+    caster.setup(errorHandler=onCasterError)
+
+    if not re.match('^https?:\/\/', args.url):
+        resolvedUrl = 'http://{}:{}/{}'.format(
+            getLocalIpAddress(),
+            args.servePort,
+            os.path.basename(os.path.expanduser(args.url))
+        )
+
+        logger.info('Resolved URL for local file: {}'.format(resolvedUrl))
+
+        startWebServer(
+            args.servePort,
+            root=os.path.dirname(os.path.expanduser(args.url))
+        )
+    else:
+        resolvedUrl = args.url
+
+    castDevice = caster.play({
+        'media': {
+            'url': resolvedUrl,
+            'args': {
+                'autoplay': True,
+                'title': os.path.basename(resolvedUrl)
+            }
+        },
+        'volume': args.deviceVolume
+    }, caster.getDevice(args.device))
+
+    if not castDevice:
+        exit(0)
+
+    def onDevicePlayerStatus(device, status):
+        global castDevice
+
+        if not castDevice:
+            logger.debug(
+                'Got device media player state "{}" while `castDevice` '
+                'was `None`'.format(status.player_state)
+            )
+            return
+
+        logger.info(
+            'Got device media player state "{}"'.format(
+                status.player_state
+            )
+        )
+
+        if status.player_state == caster.MEDIA_PLAYER_STATE_IDLE or \
+            status.player_state == caster.MEDIA_PLAYER_STATE_UNKNOWN:
+            stopAndQuitCasting(device)
+
+    caster.addDevicePlayerStatusListener(
+        castDevice,
+        onDevicePlayerStatus
+    )
+
+    while True:
+        sleep(10)
+        pass
+
+if __name__ == '__main__':
+    main()

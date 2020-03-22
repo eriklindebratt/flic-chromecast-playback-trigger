@@ -100,9 +100,9 @@ def playOrStop():
             global castDevice
 
             if not castDevice:
-                logger.info(
-                    'Got device media status "{}" while `castDevice` '
-                    'was `None`: {}'.format(status)
+                logger.debug(
+                    'Got device media player state "{}" while `castDevice` '
+                    'was `None`'.format(status.player_state)
                 )
                 return
 
