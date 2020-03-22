@@ -104,9 +104,6 @@ def exit(exitCode=0, forceQuitCaster=False):
 
     stopWebServer()
 
-    logger.info('debug waiting...')
-    sleep(10)
-
     logger.info('Exiting with code {}'.format(exitCode))
 
     sys.exit(exitCode)
@@ -185,6 +182,9 @@ def quitProcesses(processes):
     )
 
     timeout = 5
+
+    for p in processes:
+        p.terminate()
 
     _, alive = psutil.wait_procs(processes, timeout=timeout)
 
