@@ -318,7 +318,7 @@ def play(data, device=None):
     mc.block_until_active(timeout=WAIT_FOR_PLAYBACK_TIMEOUT)
     # `block_until_active` might return before `WAIT_FOR_PLAYBACK_TIMEOUT`
     # ensure we wait the whole time until checking status
-    sleep(max(WAIT_FOR_PLAYBACK_TIMEOUT - (time() - start)), 0)
+    sleep(max(WAIT_FOR_PLAYBACK_TIMEOUT - (time() - start), 0))
 
     if not mc.status.player_state in (
             MEDIA_PLAYER_STATE_PLAYING,
