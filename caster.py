@@ -23,7 +23,7 @@ deviceHostScanTimer = None
 
 DEVICE_HOST_SCAN_TIMEOUT = 15.0  # in seconds
 CONTINUOUS_DEVICE_HOST_SCAN_INTERVAL = 900.0  # in seconds
-WAIT_FOR_PLAYBACK_TIMEOUT = 3.0  # in seconds
+WAIT_FOR_PLAYBACK_TIMEOUT = 6.0  # in seconds
 
 class DeviceNotFoundError(Exception):
     pass

@@ -138,7 +138,7 @@ def onFlicButtonClickOrHold(channel, clickType, wasQueued, timeDiff):
         return
 
     if wasQueued and timeDiff > 2:
-        logger.info(
+        logger.debug(
             'Discarding previously queued click for {} button '
             '(was {} seconds ago)'.format(
                 getFlicButtonName(channel.bd_addr),
