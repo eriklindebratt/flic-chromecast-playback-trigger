@@ -1,5 +1,8 @@
 import pychromecast
 from pychromecast.controllers.media import (
+    MEDIA_PLAYER_STATE_PLAYING,
+    MEDIA_PLAYER_STATE_PAUSED,
+    MEDIA_PLAYER_STATE_BUFFERING,
     MEDIA_PLAYER_STATE_IDLE,
     MEDIA_PLAYER_STATE_UNKNOWN
 )
@@ -9,6 +12,7 @@ import sys
 import threading
 from datetime import datetime, timedelta
 from util import formatTimeDelta
+from time import time, sleep
 
 logging.getLogger('pychromecast').setLevel(logging.WARN)
 logger = logging.getLogger(__name__)
@@ -17,8 +21,15 @@ onError = lambda error: None
 deviceHosts = []
 deviceHostScanTimer = None
 
-DEVICE_HOST_SCAN_TIMEOUT = 15
+DEVICE_HOST_SCAN_TIMEOUT = 15.0  # in seconds
 CONTINUOUS_DEVICE_HOST_SCAN_INTERVAL = 900.0  # in seconds
+WAIT_FOR_PLAYBACK_TIMEOUT = 3.0  # in seconds
+
+class DeviceNotFoundError(Exception):
+    pass
+
+class PlaybackStartTimeoutError(Exception):
+    pass
 
 class DeviceStatusListener:
     def __init__(self, device, callback):
@@ -138,7 +149,7 @@ def cancelDeviceHostScanner():
 
 def getDevice(deviceName, calledFromSelf=False):
     if not calledFromSelf:
-        logger.debug('Getting device "{}"'.format(deviceName))
+        logger.info('Getting device "{}"'.format(deviceName))
 
     try:
         host = next(i for i in deviceHosts if i[-1] == deviceName)
@@ -161,7 +172,9 @@ def getDevice(deviceName, calledFromSelf=False):
                 )
             )
 
-            return None
+            raise(
+                DeviceNotFoundError('Device "{}" not found'.format(deviceName))
+            )
 
     # start worker thread and wait for cast device to be ready
     logger.debug('Device "{}" found, connecting...'.format(deviceName))
@@ -211,10 +224,7 @@ def quit(device, disconnectFromDevice=False):
         return
 
     if disconnectFromDevice:
-        logger.info(
-            'Chromecast application is quit on "{}" '
-            '- disconnecting...'.format(device.name)
-        )
+        logger.info('Disconnecting from "{}"'.format(device.name))
         device.disconnect(blocking=False)
 
 def setVolume(device, volume, callback=None, disconnectFromDevice=False):
@@ -252,9 +262,20 @@ def isPlaying(device):
         return False
 
     try:
-        return device.media_controller.is_playing
+        return device.media_controller.status.player_is_playing
     except pychromecast.error.ControllerNotRegistered as e:
         logger.error('Failed to get `isPlaying`: {}'.format(e))
+        onError(e)
+        return False
+
+def isPaused(device):
+    if not device:
+        return False
+
+    try:
+        return device.media_controller.status.player_is_paused
+    except pychromecast.error.ControllerNotRegistered as e:
+        logger.error('Failed to get `isPaused`: {}'.format(e))
         onError(e)
         return False
 
@@ -292,7 +313,21 @@ def play(data, device=None):
     mc = device.media_controller
 
     mc.play_media(data['media']['url'], **mediaArgs)
-    mc.block_until_active()
+
+    start = time()
+    mc.block_until_active(timeout=WAIT_FOR_PLAYBACK_TIMEOUT)
+    # `block_until_active` might return before `WAIT_FOR_PLAYBACK_TIMEOUT`
+    # ensure we wait the whole time until checking status
+    sleep(max(WAIT_FOR_PLAYBACK_TIMEOUT - (time() - start)), 0)
+
+    if not mc.status.player_state in (
+            MEDIA_PLAYER_STATE_PLAYING,
+            MEDIA_PLAYER_STATE_BUFFERING):
+        msg = 'Failed to start playback within {} seconds'.format(
+            WAIT_FOR_PLAYBACK_TIMEOUT
+        )
+        logger.warning(msg)
+        raise PlaybackStartTimeoutError(msg)
 
     return device
 

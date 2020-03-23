@@ -26,37 +26,52 @@ flicButtonConnectionChannels = None
 castDevice = None
 deviceNamesToSetVolumeFor = None
 deviceToCastTo = None
+hasDevicePlayerStatusListener = False
+
+def getFlicButtonName(buttonId):
+    if buttonId == BLACK_BUTTON_ADDRESS:
+        return 'Black'
+    if buttonId == TURQUOISE_BUTTON_ADDRESS:
+        return 'Turqouise'
+    else:
+        return 'UNKNOWN'
 
 def stopAndQuitCasting(device, forceQuit=False):
+    global castDevice, hasDevicePlayerStatusListener
+
     castDevice = None
+    hasDevicePlayerStatusListener = False
 
     if not forceQuit:
-        if caster.isPlaying(device):
+        if caster.isPlaying(device) or caster.isPaused(device):
             caster.stop(device)
 
         caster.quit(device, disconnectFromDevice=True)
 
 def playOrStop():
-    global castDevice
+    global castDevice, hasDevicePlayerStatusListener
 
     if castDevice is not None and caster.isPlaying(castDevice):
         logger.info('Currently playing - stopping')
         stopAndQuitCasting(castDevice)
     else:
-        castDevice = caster.play({
-            'media': {
-                'url': 'https://sverigesradio.se/topsy/direkt/srapi/132.mp3',
-                'args': {
-                    'stream_type': 'LIVE',
-                    'autoplay': True,
-                    'title': 'P1',
-                    'thumb': 'https://static-cdn.sr.se/sida/images/132/2186745_512_512.jpg?preset=api-default-square'
+        try:
+            castDevice = caster.play({
+                'media': {
+                    'url': 'https://sverigesradio.se/topsy/direkt/srapi/132.mp3',
+                    'args': {
+                        'stream_type': 'LIVE',
+                        'autoplay': True,
+                        'title': 'P1',
+                        'thumb': 'https://static-cdn.sr.se/sida/images/132/2186745_512_512.jpg?preset=api-default-square'
+                    }
                 }
-            }
-        }, caster.getDevice(deviceToCastTo))
-
-        if not castDevice:
-            return
+            }, caster.getDevice(deviceToCastTo))
+        except (caster.DeviceNotFoundError, caster.PlaybackStartTimeoutError):
+            exit(1)
+        else:
+            if not castDevice:
+                return
 
         def onDevicePlayerStatus(device, status):
             global castDevice
@@ -74,49 +89,73 @@ def playOrStop():
                 )
             )
 
-            if status.player_state == caster.MEDIA_PLAYER_STATE_IDLE or \
-                status.player_state == caster.MEDIA_PLAYER_STATE_UNKNOWN:
+            if status.player_state in (
+                    caster.MEDIA_PLAYER_STATE_PAUSED,
+                    caster.MEDIA_PLAYER_STATE_IDLE,
+                    caster.MEDIA_PLAYER_STATE_UNKNOWN):
                 stopAndQuitCasting(device)
 
-        caster.addDevicePlayerStatusListener(
-            castDevice,
-            onDevicePlayerStatus
-        )
+        if not hasDevicePlayerStatusListener:
+            caster.addDevicePlayerStatusListener(
+                castDevice,
+                onDevicePlayerStatus
+            )
+
+            hasDevicePlayerStatusListener = True
 
         ########################
         # setting device volumes
         if deviceNamesToSetVolumeFor is not None:
-            devicesToSetVolumeFor = [
-                {
-                    'device': caster.getDevice(a[0]),
-                    'volume': float(a[1])
-                } for a in [
-                    [
-                        n.strip() for n in i.strip().split('=')
-                    ] for i in deviceNamesToSetVolumeFor.split(',')
+            devicesToSetVolumeFor = None
+
+            try:
+                devicesToSetVolumeFor = [
+                    {
+                        'device': caster.getDevice(a[0]),
+                        'volume': float(a[1])
+                    } for a in [
+                        [
+                            n.strip() for n in i.strip().split('=')
+                        ] for i in deviceNamesToSetVolumeFor.split(',')
+                    ]
                 ]
-            ]
+            except caster.DeviceNotFoundError:
+                pass
+            else:
+                if devicesToSetVolumeFor is not None:
+                    [caster.setVolume(
+                        i['device'],
+                        i['volume']
+                    ) for i in devicesToSetVolumeFor]
 
-            if devicesToSetVolumeFor is not None:
-                [caster.setVolume(
-                    i['device'],
-                    i['volume']
-                ) for i in devicesToSetVolumeFor]
-
-                [i['device'].disconnect(
-                    blocking=False
-                ) for i in devicesToSetVolumeFor]
+                    [i['device'].disconnect(
+                        blocking=False
+                    ) for i in devicesToSetVolumeFor]
         ########################
 
 def onFlicButtonClickOrHold(channel, clickType, wasQueued, timeDiff):
     if clickType != fliclib.ClickType.ButtonClick:
         return
 
+    if wasQueued and timeDiff > 2:
+        logger.info(
+            'Discarding previously queued click for {} button '
+            '(was {} seconds ago)'.format(
+                getFlicButtonName(channel.bd_addr),
+                timeDiff
+            )
+        )
+        return
+
+    logger.info(
+        '{} button clicked'.format(
+            getFlicButtonName(channel.bd_addr)
+        )
+    )
+
     if channel.bd_addr == BLACK_BUTTON_ADDRESS:
-        logger.info('Black button clicked')
         playOrStop()
     elif channel.bd_addr == TURQUOISE_BUTTON_ADDRESS:
-        logger.info('Turqouise button clicked')
         playOrStop()
 
 def onFlicButtonConnectionStatusChanged(channel, connectionStatus, disconnectReason):
@@ -129,12 +168,13 @@ def onFlicButtonConnectionStatusChanged(channel, connectionStatus, disconnectRea
 def onFlicButtonCreateConnectionChannelResponse(channel, error, connectionStatus):
     if error and error is not fliclib.CreateConnectionChannelError.NoError:
         logger.error(
-            'Button "{}" got error in create connection channel \
-                response: {}. Connection status: {}'.format(
-            channel.bd_addr,
-            error,
-            connectionStatus
-        ))
+            'Button "{}" got error in create connection channel '
+            'response: {}. Connection status: {}'.format(
+                channel.bd_addr,
+                error,
+                connectionStatus
+            )
+        )
     else:
         logger.debug('Button "{}" got create connection channel response'
             .format(channel.bd_addr))
@@ -210,13 +250,13 @@ def exit(exitCode=0, forceQuitCaster=False):
 
     caster.cancelDeviceHostScanner()
 
-    if forceQuitCaster:
+    if not forceQuitCaster:
+        stopAndQuitCasting(castDevice, forceQuit=forceQuitCaster)
+    else:
         logger.info(
             'Exit was called with caster force quit requested - '
             'not calling caster’s stop+quit'
         )
-
-    stopAndQuitCasting(castDevice, forceQuit=forceQuitCaster)
 
     logger.info('Exiting with code {}'.format(exitCode))
 
@@ -243,8 +283,6 @@ if __name__ == '__main__':
     signal.signal(signal.SIGINT, onSIGINT)
     signal.signal(signal.SIGTERM, onSIGTERM)
 
-    caster.setup(errorHandler=onCasterError)
-
     # logger.info('ready')
     # input('press key...')
     # playOrStop()
@@ -252,7 +290,7 @@ if __name__ == '__main__':
         # pass
 
     try:
-        logger.info('Setting up Flic client')
+        logger.info('Setting up Flic client...')
 
         flicButtonConnectionChannels = []
 
@@ -262,7 +300,9 @@ if __name__ == '__main__':
         flicClient.on_bluetooth_controller_state_change = onFlicBluetoothControllerStateChange
     except Exception as e:
         logger.error('Failed to start Flic client: {}'.format(e))
-        exit(1)
+        exit(1, forceQuitCaster=True)
+    else:
+        caster.setup(errorHandler=onCasterError)
 
     logger.info('Ready - waiting for button clicks...\n---')
 

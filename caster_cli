@@ -27,6 +27,7 @@ logging.getLogger('urllib3').setLevel(logging.INFO)
 
 logger = None
 castDevice = None
+hasDevicePlayerStatusListener = False
 httpServer = None
 httpServerThread = None
 
@@ -71,16 +72,17 @@ def onCasterError(error=None):
     exit(1, forceQuitCaster=True)
 
 def stopAndQuitCasting(device, forceQuit=False):
-    global castDevice
+    global castDevice, hasDevicePlayerStatusListener
+
+    castDevice = None
+    hasDevicePlayerStatusListener = False
 
     if not device:
         logger.warning('`device` was None or invalid')
         return
 
-    castDevice = None
-
     if not forceQuit:
-        if caster.isPlaying(device):
+        if caster.isPlaying(device) or caster.isPaused(device):
             caster.stop(device)
 
         caster.quit(device, disconnectFromDevice=True)
@@ -92,13 +94,13 @@ def exit(exitCode=0, forceQuitCaster=False):
 
     caster.cancelDeviceHostScanner()
 
-    if forceQuitCaster:
+    if not forceQuitCaster:
+        stopAndQuitCasting(castDevice, forceQuit=forceQuitCaster)
+    else:
         logger.info(
             'Exit was called with caster force quit requested - '
             'not calling caster’s stop+quit'
         )
-
-    stopAndQuitCasting(castDevice, forceQuit=forceQuitCaster)
 
     castDevice = None
 
@@ -198,7 +200,7 @@ def quitProcesses(processes):
             p.kill()
 
 def main():
-    global logger, castDevice
+    global logger, castDevice, hasDevicePlayerStatusListener
 
     logger = logging.getLogger(__name__)
 
@@ -232,19 +234,22 @@ def main():
     else:
         resolvedUrl = args.url
 
-    castDevice = caster.play({
-        'media': {
-            'url': resolvedUrl,
-            'args': {
-                'autoplay': True,
-                'title': os.path.basename(resolvedUrl)
-            }
-        },
-        'volume': args.deviceVolume
-    }, caster.getDevice(args.device))
-
-    if not castDevice:
-        exit(0)
+    try:
+        castDevice = caster.play({
+            'media': {
+                'url': resolvedUrl,
+                'args': {
+                    'autoplay': True,
+                    'title': os.path.basename(resolvedUrl)
+                }
+            },
+            'volume': args.deviceVolume
+        }, caster.getDevice(args.device))
+    except (caster.DeviceNotFoundError, caster.PlaybackStartTimeoutError):
+        exit(1)
+    else:
+        if not castDevice:
+            exit(1)
 
     def onDevicePlayerStatus(device, status):
         global castDevice
@@ -262,14 +267,19 @@ def main():
             )
         )
 
-        if status.player_state == caster.MEDIA_PLAYER_STATE_IDLE or \
-            status.player_state == caster.MEDIA_PLAYER_STATE_UNKNOWN:
+        if status.player_state in (
+                caster.MEDIA_PLAYER_STATE_PAUSED,
+                caster.MEDIA_PLAYER_STATE_IDLE,
+                caster.MEDIA_PLAYER_STATE_UNKNOWN):
             stopAndQuitCasting(device)
 
-    caster.addDevicePlayerStatusListener(
-        castDevice,
-        onDevicePlayerStatus
-    )
+    if not hasDevicePlayerStatusListener:
+        caster.addDevicePlayerStatusListener(
+            castDevice,
+            onDevicePlayerStatus
+        )
+
+        hasDevicePlayerStatusListener = True
 
     while True:
         sleep(10)
