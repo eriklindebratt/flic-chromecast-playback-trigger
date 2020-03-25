@@ -48,7 +48,11 @@ def stopAndQuitCasting(device, forceQuit=False):
 
         caster.quit(device, disconnectFromDevice=True)
 
-def playOrStop():
+def playOrStop(data):
+    '''
+    :param data: dict
+    '''
+
     global castDevice, hasDevicePlayerStatusListener
 
     if castDevice is not None and caster.isPlaying(castDevice):
@@ -56,17 +60,7 @@ def playOrStop():
         stopAndQuitCasting(castDevice)
     else:
         try:
-            castDevice = caster.play({
-                'media': {
-                    'uri': 'https://sverigesradio.se/topsy/direkt/srapi/132.mp3',
-                    'args': {
-                        'stream_type': 'LIVE',
-                        'autoplay': True,
-                        'title': 'P1',
-                        'thumb': 'https://static-cdn.sr.se/sida/images/132/2186745_512_512.jpg?preset=api-default-square'
-                    }
-                }
-            }, caster.getDevice(deviceToCastTo))
+            castDevice = caster.play(data, caster.getDevice(deviceToCastTo))
         except (caster.DeviceNotFoundError,
                 caster.PlaybackStartTimeoutError,
                 caster.SpotifyPlaybackError) as e:
@@ -157,9 +151,23 @@ def onFlicButtonClickOrHold(channel, clickType, wasQueued, timeDiff):
     )
 
     if channel.bd_addr == BLACK_BUTTON_ADDRESS:
-        playOrStop()
+        playOrStop({
+            'media': {
+                'uri': 'spotify:playlist:37i9dQZF1DWVomJW0F2PbY'
+            }
+        })
     elif channel.bd_addr == TURQUOISE_BUTTON_ADDRESS:
-        playOrStop()
+        playOrStop({
+            'media': {
+                'uri': 'https://sverigesradio.se/topsy/direkt/srapi/132.mp3',
+                'args': {
+                    'stream_type': 'LIVE',
+                    'autoplay': True,
+                    'title': 'P1',
+                    'thumb': 'https://static-cdn.sr.se/sida/images/132/2186745_512_512.jpg?preset=api-default-square'
+                }
+            }
+        })
 
 def onFlicButtonConnectionStatusChanged(channel, connectionStatus, disconnectReason):
     logger.debug('Button "{}" changed connection status to: {}{}'.format(
@@ -296,7 +304,17 @@ if __name__ == '__main__':
 
     # logger.info('ready')
     # input('press key...')
-    # playOrStop()
+    # playOrStop({
+        # 'media': {
+            # 'uri': 'https://sverigesradio.se/topsy/direkt/srapi/132.mp3',
+            # 'args': {
+                # 'stream_type': 'LIVE',
+                # 'autoplay': True,
+                # 'title': 'P1',
+                # 'thumb': 'https://static-cdn.sr.se/sida/images/132/2186745_512_512.jpg?preset=api-default-square'
+            # }
+        # }
+    # })
     # while True:
         # pass
 

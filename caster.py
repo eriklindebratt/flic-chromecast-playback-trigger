@@ -294,6 +294,10 @@ def isSpotifyUri(uri):
     return uri.startswith('spotify:')
 
 def _setupSpotifyClient(user=None):
+    '''
+    :param user: dict
+    '''
+
     logger.info('Setting up Spotify client...')
 
     if not user.get('username') or not user.get('password'):
@@ -368,6 +372,11 @@ def _playSpotifyUri(device=None, uri=None):
     )
 
 def play(data, device=None):
+    '''
+    :param data: dict
+    :param device
+    '''
+
     if data is None:
         data = {}
 
