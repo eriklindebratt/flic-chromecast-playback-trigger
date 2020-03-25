@@ -279,6 +279,14 @@ if __name__ == '__main__':
     deviceNamesToSetVolumeFor = os.environ.get('DEVICES_TO_SET_VOLUME_FOR')
     deviceToCastTo = os.environ.get('DEVICE_TO_CAST_TO')
 
+    spotifyUser = None
+    if os.environ.get('SPOTIFY_USER_USERNAME') and \
+            os.environ.get('SPOTIFY_USER_PASSWORD'):
+        spotifyUser = {
+            'username': os.environ.get('SPOTIFY_USER_USERNAME'),
+            'password': os.environ.get('SPOTIFY_USER_PASSWORD')
+        }
+
     if not deviceToCastTo:
         logger.error('No target device specified in env vars')
         sys.exit(1)
@@ -305,7 +313,7 @@ if __name__ == '__main__':
         logger.error('Failed to start Flic client: {}'.format(e))
         exit(1, forceQuitCaster=True)
     else:
-        caster.setup(errorHandler=onCasterError)
+        caster.setup(errorHandler=onCasterError, spotifyUser=spotifyUser)
 
     logger.info('Ready - waiting for button clicks...\n---')
 

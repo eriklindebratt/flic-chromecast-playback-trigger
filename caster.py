@@ -14,7 +14,6 @@ import threading
 from datetime import datetime, timedelta
 from util import formatTimeDelta
 from time import time, sleep
-import os
 import spotipy
 import spotify_token
 
@@ -24,6 +23,8 @@ logger = logging.getLogger(__name__)
 onError = lambda error: None
 deviceHosts = []
 deviceHostScanTimer = None
+_spotifyClient = None
+_spotifyAuth = None
 
 DEVICE_HOST_SCAN_TIMEOUT = 15.0  # in seconds
 CONTINUOUS_DEVICE_HOST_SCAN_INTERVAL = 900.0  # in seconds
@@ -70,13 +71,16 @@ class DeviceMediaStatusListener:
 
         self.callback(self.device, status)
 
-def setup(errorHandler=None):
-    global onError
+def setup(errorHandler=None, spotifyUser=None):
+    global onError, _spotifyClient, _spotifyAuth
 
     logger.info('Setting up...')
 
     if errorHandler is not None:
         onError = errorHandler
+
+    if spotifyUser:
+        _spotifyClient, _spotifyAuth = _setupSpotifyClient(user=spotifyUser)
 
     if not scanForDeviceHosts():
         logger.error('Setup completed with failing scanner')
@@ -289,19 +293,18 @@ def isPaused(device):
 def isSpotifyUri(uri):
     return uri.startswith('spotify:')
 
-def _setupSpotifyClient():
-    spotifyUserUsername = os.environ.get('SPOTIFY_USER_USERNAME')
-    spotifyUserPassword = os.environ.get('SPOTIFY_USER_PASSWORD')
+def _setupSpotifyClient(user=None):
+    logger.info('Setting up Spotify client...')
 
-    if not spotifyUserUsername or not spotifyUserPassword:
+    if not user.get('username') or not user.get('password'):
         raise SpotifyPlaybackError(
-            'Missing Spotify user credentials in env vars'
+            'Missing Spotify user credentials'
         )
 
     # create a spotify token
     data = spotify_token.start_session(
-        spotifyUserUsername,
-        spotifyUserPassword
+        user['username'],
+        user['password']
     )
     accessToken = data[0]
     expiry = data[1] - int(time())
@@ -314,13 +317,13 @@ def _setupSpotifyClient():
 
     return client, {'token': accessToken, 'tokenExpiry': expiry}
 
-def _playSpotifyUri(device, uri):
-    spotifyClient, spotifyAuth = _setupSpotifyClient()
+def _playSpotifyUri(device=None, uri=None):
+    logger.debug('Playing Spotify URI...')
 
     # launch the Spotify app on the device we want to cast to
     controller = SpotifyController(
-        spotifyAuth['token'],
-        spotifyAuth['tokenExpiry']
+        _spotifyAuth['token'],
+        _spotifyAuth['tokenExpiry']
     )
     device.register_handler(controller)
     controller.launch_app()
@@ -336,7 +339,7 @@ def _playSpotifyUri(device, uri):
         )
 
     # query Spotify for active devices
-    devicesAvailable = spotifyClient.devices()
+    devicesAvailable = _spotifyClient.devices()
 
     logger.debug(
         'Available Spotify devices: {}'.format(devicesAvailable['devices'])
@@ -359,7 +362,7 @@ def _playSpotifyUri(device, uri):
         sys.exit(1)
 
     # start playback
-    spotifyClient.start_playback(
+    _spotifyClient.start_playback(
         device_id=spotifyDeviceId,
         context_uri=uri
     )
@@ -399,7 +402,7 @@ def play(data, device=None):
     mc = device.media_controller
 
     if isSpotifyUri(data['media']['uri']):
-        _playSpotifyUri(device, data['media']['uri'])
+        _playSpotifyUri(device=device, uri=data['media']['uri'])
     else:
         mc.play_media(data['media']['uri'], **mediaArgs)
 

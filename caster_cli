@@ -127,13 +127,15 @@ def collectArgs():
         '--device',
         '-d',
         type=str,
-        help='Name of the Chromecast device to cast to'
+        help='Name of the Chromecast device to cast to',
+        required=True
     )
     requiredArgs.add_argument(
         '--uri',
         '-u',
         type=str,
-        help='URI to the media file to be played'
+        help='URI to the media file to be played',
+        required=True
     )
 
     optionalArgs = argParser.add_argument_group('optional arguments')
@@ -151,13 +153,33 @@ def collectArgs():
         help='Volume (0.0-1.0) to set on Chromecast device'
     )
     optionalArgs.add_argument(
+        '--spotifyUserUsername',
+        '-su',
+        type=str,
+        help='Required to play Spotify URIs'
+    )
+    optionalArgs.add_argument(
+        '--spotifyUserPassword',
+        '-sp',
+        type=str,
+        help='Required to play Spotify URIs'
+    )
+    optionalArgs.add_argument(
         '--quit',
         '-q',
         action='store_true',
         help='Pass to quit an already running process'
     )
+    optionalArgs.add_argument(
+        '--debug',
+        action='store_true',
+        help='Pass to show debug info'
+    )
 
     args = argParser.parse_args()
+
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
 
     if not args.quit:
         if not args.device or not args.uri:
@@ -168,6 +190,12 @@ def collectArgs():
             argParser.error(
                 'URI must be an HTTPS URL, a Spotify URI or '
                 'a path to a local file.'
+            )
+
+        if caster.isSpotifyUri(args.uri) and not (args.spotifyUserUsername and args.spotifyUserPassword):
+            argParser.error(
+                'Spotify user credentials are required '
+                'to play Spotify URIs'
             )
 
         if args.deviceVolume and (args.deviceVolume < 0.0 or args.deviceVolume > 1.0):
@@ -216,7 +244,10 @@ def main():
         ))
         return
 
-    caster.setup(errorHandler=onCasterError)
+    caster.setup(errorHandler=onCasterError, spotifyUser={
+        'username': args.spotifyUserUsername,
+        'password': args.spotifyUserPassword
+    })
 
     if not re.match('^https?:\/\/', args.uri) and not caster.isSpotifyUri(args.uri):
         resolvedUri = 'http://{}:{}/{}'.format(
