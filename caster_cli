@@ -273,7 +273,7 @@ def main():
                 caster.MEDIA_PLAYER_STATE_PAUSED,
                 caster.MEDIA_PLAYER_STATE_IDLE,
                 caster.MEDIA_PLAYER_STATE_UNKNOWN):
-            stopAndQuitCasting(device)
+            exit(0)
 
     if not hasDevicePlayerStatusListener:
         caster.addDevicePlayerStatusListener(
