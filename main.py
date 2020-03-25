@@ -69,7 +69,8 @@ def playOrStop():
             }, caster.getDevice(deviceToCastTo))
         except (caster.DeviceNotFoundError,
                 caster.PlaybackStartTimeoutError,
-                caster.SpotifyPlaybackError):
+                caster.SpotifyPlaybackError) as e:
+            logger.error('Failed to start playback: {}'.format(e))
             exit(1)
         else:
             if not castDevice:
