@@ -178,9 +178,6 @@ def collectArgs():
 
     args = argParser.parse_args()
 
-    if args.debug:
-        logger.setLevel(logging.DEBUG)
-
     if not args.quit:
         if not args.device or not args.uri:
             argParser.print_usage()
@@ -237,6 +234,9 @@ def main():
 
     args = collectArgs()
 
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+
     if args.quit:
         quitProcesses(getProcessesByName(
             ['python3', 'python'],
@@ -244,10 +244,14 @@ def main():
         ))
         return
 
-    caster.setup(errorHandler=onCasterError, spotifyUser={
-        'username': args.spotifyUserUsername,
-        'password': args.spotifyUserPassword
-    })
+    caster.setup(
+        logLevel=logger.level,
+        errorHandler=onCasterError,
+        spotifyUser={
+            'username': args.spotifyUserUsername,
+            'password': args.spotifyUserPassword
+        }
+    )
 
     if not re.match('^https?:\/\/', args.uri) and not caster.isSpotifyUri(args.uri):
         resolvedUri = 'http://{}:{}/{}'.format(

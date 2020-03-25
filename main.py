@@ -287,6 +287,18 @@ if __name__ == '__main__':
     deviceNamesToSetVolumeFor = os.environ.get('DEVICES_TO_SET_VOLUME_FOR')
     deviceToCastTo = os.environ.get('DEVICE_TO_CAST_TO')
 
+    logLevel = os.environ.get('LOG_LEVEL')
+    if logLevel == 'CRITICAL':
+        logger.setLevel(logging.CRITICAL)
+    elif logLevel == 'ERROR':
+        logger.setLevel(logging.ERROR)
+    elif logLevel == 'WARNING':
+        logger.setLevel(logging.WARNING)
+    elif logLevel == 'INFO':
+        logger.setLevel(logging.INFO)
+    elif logLevel == 'DEBUG':
+        logger.setLevel(logging.DEBUG)
+
     spotifyUser = None
     if os.environ.get('SPOTIFY_USER_USERNAME') and \
             os.environ.get('SPOTIFY_USER_PASSWORD'):
@@ -302,6 +314,11 @@ if __name__ == '__main__':
     signal.signal(signal.SIGINT, onSIGINT)
     signal.signal(signal.SIGTERM, onSIGTERM)
 
+    # caster.setup(
+        # logLevel=logger.level,
+        # errorHandler=onCasterError,
+        # spotifyUser=spotifyUser
+    # )
     # logger.info('ready')
     # input('press key...')
     # playOrStop({
@@ -331,7 +348,11 @@ if __name__ == '__main__':
         logger.error('Failed to start Flic client: {}'.format(e))
         exit(1, forceQuitCaster=True)
     else:
-        caster.setup(errorHandler=onCasterError, spotifyUser=spotifyUser)
+        caster.setup(
+            logLevel=logger.level,
+            errorHandler=onCasterError,
+            spotifyUser=spotifyUser
+        )
 
     logger.info('Ready - waiting for button clicks...\n---')
 

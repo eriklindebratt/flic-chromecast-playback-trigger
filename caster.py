@@ -28,7 +28,7 @@ _spotifyAuth = None
 
 DEVICE_HOST_SCAN_TIMEOUT = 15.0  # in seconds
 CONTINUOUS_DEVICE_HOST_SCAN_INTERVAL = 900.0  # in seconds
-WAIT_FOR_PLAYBACK_TIMEOUT = 6.0  # in seconds
+WAIT_FOR_PLAYBACK_TIMEOUT = 4.0  # in seconds
 
 class DeviceNotFoundError(Exception):
     pass
@@ -71,12 +71,15 @@ class DeviceMediaStatusListener:
 
         self.callback(self.device, status)
 
-def setup(errorHandler=None, spotifyUser=None):
+def setup(logLevel=None, errorHandler=None, spotifyUser=None):
     global onError, _spotifyClient, _spotifyAuth
+
+    if logLevel:
+        logger.setLevel(logLevel)
 
     logger.info('Setting up...')
 
-    if errorHandler is not None:
+    if errorHandler:
         onError = errorHandler
 
     if spotifyUser:
@@ -160,7 +163,7 @@ def cancelDeviceHostScanner():
 
 def getDevice(deviceName, calledFromSelf=False):
     if not calledFromSelf:
-        logger.info('Getting device "{}"'.format(deviceName))
+        logger.debug('Getting device "{}"'.format(deviceName))
 
     try:
         host = next(i for i in deviceHosts if i[-1] == deviceName)
