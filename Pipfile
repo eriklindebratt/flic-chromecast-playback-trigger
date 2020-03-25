@@ -8,6 +8,8 @@ verify_ssl = true
 [packages]
 pychromecast = "*"
 psutil = "*"
+spotify-token = "*"
+spotipy = "*"
 
 [requires]
 python_version = "3"

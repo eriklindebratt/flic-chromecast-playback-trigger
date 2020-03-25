@@ -58,7 +58,7 @@ def playOrStop():
         try:
             castDevice = caster.play({
                 'media': {
-                    'url': 'https://sverigesradio.se/topsy/direkt/srapi/132.mp3',
+                    'uri': 'https://sverigesradio.se/topsy/direkt/srapi/132.mp3',
                     'args': {
                         'stream_type': 'LIVE',
                         'autoplay': True,
@@ -67,7 +67,9 @@ def playOrStop():
                     }
                 }
             }, caster.getDevice(deviceToCastTo))
-        except (caster.DeviceNotFoundError, caster.PlaybackStartTimeoutError):
+        except (caster.DeviceNotFoundError,
+                caster.PlaybackStartTimeoutError,
+                caster.SpotifyPlaybackError):
             exit(1)
         else:
             if not castDevice:
