@@ -380,6 +380,9 @@ def play(data, device=None):
     if data is None:
         data = {}
 
+    if not data['media'].get('args'):
+        data['media']['args'] = {}
+
     ########################
     # set up media data structure
     mediaArgs = dict(data['media']['args'])
