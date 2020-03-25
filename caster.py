@@ -6,6 +6,7 @@ from pychromecast.controllers.media import (
     MEDIA_PLAYER_STATE_IDLE,
     MEDIA_PLAYER_STATE_UNKNOWN
 )
+from pychromecast.controllers.spotify import SpotifyController
 from mimetypes import MimeTypes
 import logging
 import sys
@@ -13,6 +14,9 @@ import threading
 from datetime import datetime, timedelta
 from util import formatTimeDelta
 from time import time, sleep
+import os
+import spotipy
+import spotify_token
 
 logging.getLogger('pychromecast').setLevel(logging.WARN)
 logger = logging.getLogger(__name__)
@@ -29,6 +33,9 @@ class DeviceNotFoundError(Exception):
     pass
 
 class PlaybackStartTimeoutError(Exception):
+    pass
+
+class SpotifyPlaybackError(Exception):
     pass
 
 class DeviceStatusListener:
@@ -172,8 +179,8 @@ def getDevice(deviceName, calledFromSelf=False):
                 )
             )
 
-            raise(
-                DeviceNotFoundError('Device "{}" not found'.format(deviceName))
+            raise DeviceNotFoundError(
+                'Device "{}" not found'.format(deviceName)
             )
 
     # start worker thread and wait for cast device to be ready
@@ -279,6 +286,84 @@ def isPaused(device):
         onError(e)
         return False
 
+def isSpotifyUri(uri):
+    return uri.startswith('spotify:')
+
+def _setupSpotifyClient():
+    spotifyUserUsername = os.environ.get('SPOTIFY_USER_USERNAME')
+    spotifyUserPassword = os.environ.get('SPOTIFY_USER_PASSWORD')
+
+    if not spotifyUserUsername or not spotifyUserPassword:
+        raise SpotifyPlaybackError(
+            'Missing Spotify user credentials in env vars'
+        )
+
+    # create a spotify token
+    data = spotify_token.start_session(
+        spotifyUserUsername,
+        spotifyUserPassword
+    )
+    accessToken = data[0]
+    expiry = data[1] - int(time())
+
+    client = spotipy.Spotify(auth=accessToken)
+
+    if logger.level == logging.DEBUG:
+        spotipy.trace = True
+        spotipy.trace_out = True
+
+    return client, {'token': accessToken, 'tokenExpiry': expiry}
+
+def _playSpotifyUri(device, uri):
+    spotifyClient, spotifyAuth = _setupSpotifyClient()
+
+    # launch the Spotify app on the device we want to cast to
+    controller = SpotifyController(
+        spotifyAuth['token'],
+        spotifyAuth['tokenExpiry']
+    )
+    device.register_handler(controller)
+    controller.launch_app()
+
+    if not controller.is_launched and not controller.credential_error:
+        raise SpotifyPlaybackError(
+            'Failed to launch Spotify controller due to timeout'
+        )
+
+    if not controller.is_launched and controller.credential_error:
+        raise SpotifyPlaybackError(
+            'Failed to launch Spotify controller due to credential error'
+        )
+
+    # query Spotify for active devices
+    devicesAvailable = spotifyClient.devices()
+
+    logger.debug(
+        'Available Spotify devices: {}'.format(devicesAvailable['devices'])
+    )
+
+    # match active Spotify devices with the Spotify controller's device ID
+    spotifyDeviceId = None
+    for device in devicesAvailable['devices']:
+        if device['id'] == controller.device:
+            spotifyDeviceId = device['id']
+            break
+
+    if not spotifyDeviceId:
+        raise SpotifyPlaybackError(
+            'Device with ID "{}" is unknown by Spotify '
+            '(see debug logs details about known Spotify devices)'.format(
+                controller.device
+            )
+        )
+        sys.exit(1)
+
+    # start playback
+    spotifyClient.start_playback(
+        device_id=spotifyDeviceId,
+        context_uri=uri
+    )
+
 def play(data, device=None):
     if data is None:
         data = {}
@@ -287,32 +372,36 @@ def play(data, device=None):
     # set up media data structure
     mediaArgs = dict(data['media']['args'])
 
-    try:
-        mimeType = MimeTypes().guess_type(data['media']['url'])[0]
-        mediaArgs['content_type'] = mimeType
-    except IndexError:
-        raise Exception(
-            'Failed to look up mime type for media url "{}"'.format(
-                data['media']['url']
+    if not isSpotifyUri(data['media']['uri']):
+        try:
+            mimeType = MimeTypes().guess_type(data['media']['uri'])[0]
+            mediaArgs['content_type'] = mimeType
+        except IndexError:
+            raise Exception(
+                'Failed to look up mime type for media uri "{}"'.format(
+                    data['media']['uri']
+                )
             )
-        )
-    if not mediaArgs.get('content_type'):
-        raise Exception(
-            'Failed to look up mime type for media url "{}"'.format(
-                data['media']['url']
+        if not mediaArgs.get('content_type'):
+            raise Exception(
+                'Failed to look up mime type for media uri "{}"'.format(
+                    data['media']['uri']
+                )
             )
-        )
     ########################
 
     if data.get('volume') is not None:
         setVolume(device, data['volume'])
 
     logger.info('Starting playback on "{}"'.format(device.name))
-    logger.debug('Playing:\n  - url: {}\n  - args: {}'.format(data['media']['url'], mediaArgs))
+    logger.debug('Playing:\n  - uri: {}\n  - args: {}'.format(data['media']['uri'], mediaArgs))
 
     mc = device.media_controller
 
-    mc.play_media(data['media']['url'], **mediaArgs)
+    if isSpotifyUri(data['media']['uri']):
+        _playSpotifyUri(device, data['media']['uri'])
+    else:
+        mc.play_media(data['media']['uri'], **mediaArgs)
 
     start = time()
     mc.block_until_active(timeout=WAIT_FOR_PLAYBACK_TIMEOUT)
