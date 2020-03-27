@@ -339,7 +339,11 @@ def _getSpotifyDeviceIdFromDevice(deviceId=None, deviceName=None):
     if not deviceId and not deviceName:
         raise Exception('Either `deviceId` or `deviceName` are required params')
 
-    for spotifyDevice in _getSpotifyAvailableDevices():
+    availableSpotifyDevices = _getSpotifyAvailableDevices()
+
+    logger.debug('Available Spotify devices: {}'.format(availableSpotifyDevices))
+
+    for spotifyDevice in availableSpotifyDevices:
         if deviceId and spotifyDevice['id'] == deviceId:
              return spotifyDevice['id']
         elif deviceName and spotifyDevice['name'] == deviceName:
