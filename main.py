@@ -86,11 +86,18 @@ def playOrStop(data):
                 )
             )
 
-            if status.player_state in (
-                    caster.MEDIA_PLAYER_STATE_PAUSED,
+            if not caster.isPlaying(device) and status.player_state in (
                     caster.MEDIA_PLAYER_STATE_IDLE,
                     caster.MEDIA_PLAYER_STATE_UNKNOWN):
+                logger.debug('Player state is valid for exit')
                 stopAndQuitCasting(device)
+                return
+
+            if status.stream_type == caster.STREAM_TYPE_LIVE and \
+                    status.player_state == caster.MEDIA_PLAYER_STATE_PAUSED:
+                logger.info('Player state is valid for exit (paused live stream)')
+                stopAndQuitCasting(device)
+                return
 
         if not hasDevicePlayerStatusListener:
             caster.addDevicePlayerStatusListener(
@@ -161,7 +168,7 @@ def onFlicButtonClickOrHold(channel, clickType, wasQueued, timeDiff):
             'media': {
                 'uri': 'https://sverigesradio.se/topsy/direkt/srapi/132.mp3',
                 'args': {
-                    'stream_type': 'LIVE',
+                    'stream_type': caster.STREAM_TYPE_LIVE,
                     'autoplay': True,
                     'title': 'P1',
                     'thumb': 'https://static-cdn.sr.se/sida/images/132/2186745_512_512.jpg?preset=api-default-square'
@@ -325,7 +332,7 @@ if __name__ == '__main__':
         # 'media': {
             # 'uri': 'https://sverigesradio.se/topsy/direkt/srapi/132.mp3',
             # 'args': {
-                # 'stream_type': 'LIVE',
+                # 'stream_type': caster.STREAM_TYPE_LIVE,
                 # 'autoplay': True,
                 # 'title': 'P1',
                 # 'thumb': 'https://static-cdn.sr.se/sida/images/132/2186745_512_512.jpg?preset=api-default-square'

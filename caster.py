@@ -4,7 +4,11 @@ from pychromecast.controllers.media import (
     MEDIA_PLAYER_STATE_PAUSED,
     MEDIA_PLAYER_STATE_BUFFERING,
     MEDIA_PLAYER_STATE_IDLE,
-    MEDIA_PLAYER_STATE_UNKNOWN
+    MEDIA_PLAYER_STATE_UNKNOWN,
+
+    STREAM_TYPE_UNKNOWN,
+    STREAM_TYPE_BUFFERED,
+    STREAM_TYPE_LIVE
 )
 from pychromecast.controllers.spotify import SpotifyController
 from mimetypes import MimeTypes
@@ -16,6 +20,7 @@ from util import formatTimeDelta
 from time import time, sleep
 import spotipy
 import spotify_token
+# from random import randint
 
 logging.getLogger('pychromecast').setLevel(logging.WARN)
 logger = logging.getLogger(__name__)
@@ -28,7 +33,7 @@ _spotifyAuth = None
 
 DEVICE_HOST_SCAN_TIMEOUT = 15.0  # in seconds
 CONTINUOUS_DEVICE_HOST_SCAN_INTERVAL = 900.0  # in seconds
-WAIT_FOR_PLAYBACK_TIMEOUT = 4.0  # in seconds
+WAIT_FOR_PLAYBACK_TIMEOUT = 10.0  # in seconds
 
 class DeviceNotFoundError(Exception):
     pass
@@ -206,6 +211,11 @@ def stop(device, disconnectFromDevice=False):
     logger.info('Stopping playback on "{}"'.format(device.name))
 
     try:
+        _pauseSpotify(device)
+    except Exception as e:
+        pass
+
+    try:
         device.media_controller.stop()
     except pychromecast.error.ControllerNotRegistered as e:
         logger.error('Failed to stop: {}'.format(e))
@@ -276,11 +286,29 @@ def isPlaying(device):
         return False
 
     try:
-        return device.media_controller.status.player_is_playing
+        return isSpotifyPlaying(device) or \
+                device.media_controller.status.player_is_playing
     except pychromecast.error.ControllerNotRegistered as e:
         logger.error('Failed to get `isPlaying`: {}'.format(e))
         onError(e)
         return False
+
+def isSpotifyPlaying(device):
+    if not device:
+        return False
+
+    if not _spotifyClient:
+        return False
+
+    playbackStatus = _spotifyClient.current_playback()
+
+    if not playbackStatus:
+        return False
+
+    if playbackStatus.get('device', {}).get('name') != device.name:
+        return False
+
+    return playbackStatus.get('is_playing', False)
 
 def isPaused(device):
     if not device:
@@ -295,6 +323,29 @@ def isPaused(device):
 
 def isSpotifyUri(uri):
     return uri.startswith('spotify:')
+
+def _getSpotifyAvailableDevices():
+    if not _spotifyClient:
+        raise Exception('Spotify client is not set up')
+
+    return _spotifyClient.devices().get('devices', [])
+
+def _getSpotifyDeviceIdFromDevice(deviceId=None, deviceName=None):
+    '''
+    :param deviceId: str Optional if `deviceName` is passed
+    :param deviceName: str Optional if `deviceId` is passed
+    '''
+
+    if not deviceId and not deviceName:
+        raise Exception('Either `deviceId` or `deviceName` are required params')
+
+    for spotifyDevice in _getSpotifyAvailableDevices():
+        if deviceId and spotifyDevice['id'] == deviceId:
+             return spotifyDevice['id']
+        elif deviceName and spotifyDevice['name'] == deviceName:
+            return spotifyDevice['id']
+
+    return None
 
 def _setupSpotifyClient(user=None):
     '''
@@ -345,19 +396,7 @@ def _playSpotifyUri(device=None, uri=None):
             'Failed to launch Spotify controller due to credential error'
         )
 
-    # query Spotify for active devices
-    devicesAvailable = _spotifyClient.devices()
-
-    logger.debug(
-        'Available Spotify devices: {}'.format(devicesAvailable['devices'])
-    )
-
-    # match active Spotify devices with the Spotify controller's device ID
-    spotifyDeviceId = None
-    for device in devicesAvailable['devices']:
-        if device['id'] == controller.device:
-            spotifyDeviceId = device['id']
-            break
+    spotifyDeviceId = _getSpotifyDeviceIdFromDevice(deviceId=controller.device)
 
     if not spotifyDeviceId:
         raise SpotifyPlaybackError(
@@ -368,11 +407,41 @@ def _playSpotifyUri(device=None, uri=None):
         )
         sys.exit(1)
 
+    # offset = {'position': 0}
+    # if uri.startswith('spotify:playlist:') and randomizedPlaylistStart:
+        # playlistId = uri.split('spotify:playlist:', False)[0]
+        # playlistItemCount = len(_spotifyClient.user_playlist_tracks(
+                # playlist_id=playlistId)['items'])
+
+        # offset = {'position': randint(0, playlistItemCount-1)}
+
+        # # need to enable repeat to ensure items after
+        # # the offset position will get played
+        # _spotifyClient.repeat('context', device_id=spotifyDeviceId)
+
     # start playback
     _spotifyClient.start_playback(
         device_id=spotifyDeviceId,
-        context_uri=uri
+        context_uri=uri#,
+        # offset=offset
     )
+
+def _pauseSpotify(device):
+    if not _spotifyClient:
+        raise Exception('Spotify client is not set up')
+
+    spotifyDeviceId = _getSpotifyDeviceIdFromDevice(deviceName=device.name)
+
+    if not spotifyDeviceId:
+        raise SpotifyPlaybackError(
+            'Device with ID "{}" is unknown by Spotify '
+            '(see debug logs details about known Spotify devices)'.format(
+                controller.device
+            )
+        )
+        sys.exit(1)
+
+    _spotifyClient.pause_playback(device_id=spotifyDeviceId)
 
 def play(data, device=None):
     '''
@@ -417,24 +486,29 @@ def play(data, device=None):
     mc = device.media_controller
 
     if isSpotifyUri(data['media']['uri']):
-        _playSpotifyUri(device=device, uri=data['media']['uri'])
+        _playSpotifyUri(
+            device=device,
+            uri=data['media']['uri']
+        )
     else:
         mc.play_media(data['media']['uri'], **mediaArgs)
 
-    start = time()
-    mc.block_until_active(timeout=WAIT_FOR_PLAYBACK_TIMEOUT)
-    # `block_until_active` might return before `WAIT_FOR_PLAYBACK_TIMEOUT`
-    # ensure we wait the whole time until checking status
-    sleep(max(WAIT_FOR_PLAYBACK_TIMEOUT - (time() - start), 0))
+    mc.block_until_active()
+    # FIXME: This can't be blocking, disabling it for now
+    #start = time()
+    #mc.block_until_active(timeout=WAIT_FOR_PLAYBACK_TIMEOUT)
+    ## `block_until_active` might return before `WAIT_FOR_PLAYBACK_TIMEOUT`
+    ## ensure we wait the whole time until checking status
+    #sleep(max(WAIT_FOR_PLAYBACK_TIMEOUT - (time() - start), 0))
 
-    if not mc.status.player_state in (
-            MEDIA_PLAYER_STATE_PLAYING,
-            MEDIA_PLAYER_STATE_BUFFERING):
-        msg = 'Failed to start playback within {} seconds'.format(
-            WAIT_FOR_PLAYBACK_TIMEOUT
-        )
-        logger.warning(msg)
-        raise PlaybackStartTimeoutError(msg)
+    #if not mc.status.player_state in (
+    #        MEDIA_PLAYER_STATE_PLAYING,
+    #        MEDIA_PLAYER_STATE_BUFFERING):
+    #    msg = 'Failed to start playback within {} seconds'.format(
+    #        WAIT_FOR_PLAYBACK_TIMEOUT
+    #    )
+    #    logger.warning(msg)
+    #    raise PlaybackStartTimeoutError(msg)
 
     return device
 

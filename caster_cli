@@ -7,8 +7,6 @@ import sys
 import signal
 import os
 from http.server import HTTPServer, SimpleHTTPRequestHandler
-import random
-import tempfile
 import threading
 import re
 from util import getLocalIpAddress, getProcessesByName
@@ -244,13 +242,17 @@ def main():
         ))
         return
 
-    caster.setup(
-        logLevel=logger.level,
-        errorHandler=onCasterError,
-        spotifyUser={
+    spotifyUser = None
+    if args.spotifyUserUsername and args.spotifyUserPassword:
+        spotifyUser ={
             'username': args.spotifyUserUsername,
             'password': args.spotifyUserPassword
         }
+
+    caster.setup(
+        logLevel=logger.level,
+        errorHandler=onCasterError,
+        spotifyUser=spotifyUser
     )
 
     if not re.match('^https?:\/\/', args.uri) and not caster.isSpotifyUri(args.uri):
@@ -270,12 +272,17 @@ def main():
         resolvedUri = args.uri
 
     try:
+        try:
+            title = os.path.basename(resolvedUri) or 'Unknown'
+        except:
+            title = 'Unknown'
+
         castDevice = caster.play({
             'media': {
                 'uri': resolvedUri,
                 'args': {
                     'autoplay': True,
-                    'title': os.path.basename(resolvedUri)
+                    'title': title
                 }
             },
             'volume': args.deviceVolume
@@ -305,11 +312,18 @@ def main():
             )
         )
 
-        if status.player_state in (
-                caster.MEDIA_PLAYER_STATE_PAUSED,
+        if not caster.isPlaying(device) and status.player_state in (
                 caster.MEDIA_PLAYER_STATE_IDLE,
                 caster.MEDIA_PLAYER_STATE_UNKNOWN):
+            logger.debug('Player state is valid for exit')
             exit(0)
+            return
+
+        if status.stream_type == caster.STREAM_TYPE_LIVE and \
+                status.player_state == caster.MEDIA_PLAYER_STATE_PAUSED:
+            logger.info('Player state is valid for exit (paused live stream)')
+            exit(0)
+            return
 
     if not hasDevicePlayerStatusListener:
         caster.addDevicePlayerStatusListener(
