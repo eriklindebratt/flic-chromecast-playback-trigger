@@ -175,7 +175,7 @@ def getDevice(deviceName, calledFromSelf=False):
         device = pychromecast.Chromecast(host[0], host[1])
     except StopIteration:
         if not calledFromSelf:
-            logger.warn(
+            logger.warning(
                 'Device "{}" not found - trigger new device scan'.format(
                     deviceName
                 )
@@ -185,7 +185,7 @@ def getDevice(deviceName, calledFromSelf=False):
 
             return getDevice(deviceName, calledFromSelf=True)
         else:
-            logger.warn(
+            logger.warning(
                 'Device "{}" not found (tried scanning anew)'.format(
                     deviceName
                 )
@@ -300,7 +300,14 @@ def isSpotifyPlaying(device):
     if not _spotifyClient:
         return False
 
-    playbackStatus = _spotifyClient.current_playback()
+    try:
+        playbackStatus = _spotifyClient.current_playback()
+    except spotipy.client.SpotifyException:
+        logger.exception(
+            'Error: Failed to get current Spotify playback status'
+            ' - got Spotify error'
+        )
+        return False
 
     if not playbackStatus:
         return False
@@ -324,11 +331,39 @@ def isPaused(device):
 def isSpotifyUri(uri):
     return uri.startswith('spotify:')
 
-def _getSpotifyAvailableDevices():
+def _getSpotifyAvailableDevices(calledFromSelf=False):
     if not _spotifyClient:
         raise Exception('Spotify client is not set up')
 
-    return _spotifyClient.devices().get('devices', [])
+    try:
+        devices = _spotifyClient.devices().get('devices', [])
+    except spotipy.client.SpotifyException:
+        if calledFromSelf:
+            logger.exception(
+                'Error: Failed to get Spotify devices (second attempt)'
+                ' - got Spotify error'
+            )
+        else:
+            logger.exception(
+                'Error: Failed to get Spotify devices'
+                ' - got Spotify error'
+            )
+        devices = []
+
+    if not devices:
+        if not calledFromSelf:
+            logger.warning(
+                'No available Spotify devices found '
+                '- trying once more'
+            )
+
+            return _getSpotifyAvailableDevices(calledFromSelf=True)
+        else:
+            logger.warning(
+                'No available Spotify devices found after second attempt'
+            )
+
+    return devices
 
 def _getSpotifyDeviceIdFromDevice(deviceId=None, deviceName=None):
     '''
@@ -345,11 +380,11 @@ def _getSpotifyDeviceIdFromDevice(deviceId=None, deviceName=None):
 
     for spotifyDevice in availableSpotifyDevices:
         if deviceId and spotifyDevice['id'] == deviceId:
-             return spotifyDevice['id']
+             return spotifyDevice['id'], availableSpotifyDevices
         elif deviceName and spotifyDevice['name'] == deviceName:
-            return spotifyDevice['id']
+            return spotifyDevice['id'], availableSpotifyDevices
 
-    return None
+    return None, availableSpotifyDevices
 
 def _setupSpotifyClient(user=None):
     '''
@@ -400,16 +435,22 @@ def _playSpotifyUri(device=None, uri=None):
             'Failed to launch Spotify controller due to credential error'
         )
 
-    spotifyDeviceId = _getSpotifyDeviceIdFromDevice(deviceId=controller.device)
+    spotifyDeviceId, availableSpotifyDevices = \
+            _getSpotifyDeviceIdFromDevice(deviceId=controller.device)
 
     if not spotifyDeviceId:
+        logger.error(
+            'Device with ID "{}" is unknown to Spotify. '
+            'Available devices: {}'.format(
+                controller.device,
+                availableSpotifyDevices
+            )
+        )
         raise SpotifyPlaybackError(
-            'Device with ID "{}" is unknown by Spotify '
-            '(see debug logs details about known Spotify devices)'.format(
+            'Device with ID "{}" is unknown to Spotify'.format(
                 controller.device
             )
         )
-        sys.exit(1)
 
     # offset = {'position': 0}
     # if uri.startswith('spotify:playlist:') and randomizedPlaylistStart:
@@ -424,28 +465,48 @@ def _playSpotifyUri(device=None, uri=None):
         # _spotifyClient.repeat('context', device_id=spotifyDeviceId)
 
     # start playback
-    _spotifyClient.start_playback(
-        device_id=spotifyDeviceId,
-        context_uri=uri#,
-        # offset=offset
-    )
+    try:
+        _spotifyClient.start_playback(
+            device_id=spotifyDeviceId,
+            context_uri=uri#,
+            # offset=offset
+        )
+    except spotipy.client.SpotifyException:
+        logger.exception(
+            'Error: Failed to start Spotify playback'
+            ' - got Spotify error'
+        )
+
+        raise SpotifyPlaybackError('Could not start playback')
 
 def _pauseSpotify(device):
     if not _spotifyClient:
         raise Exception('Spotify client is not set up')
 
-    spotifyDeviceId = _getSpotifyDeviceIdFromDevice(deviceName=device.name)
+    spotifyDeviceId, availableSpotifyDevices = \
+            _getSpotifyDeviceIdFromDevice(deviceName=device.name)
 
     if not spotifyDeviceId:
-        raise SpotifyPlaybackError(
-            'Device with ID "{}" is unknown by Spotify '
-            '(see debug logs details about known Spotify devices)'.format(
-                controller.device
+        logger.error(
+            'Device with name "{}" is unknown to Spotify. '
+            'Available devices: {}'.format(
+                device.name,
+                availableSpotifyDevices
             )
         )
-        sys.exit(1)
+        raise SpotifyPlaybackError(
+            'Device with name "{}" is unknown to Spotify'.format(
+                device.name
+            )
+        )
 
-    _spotifyClient.pause_playback(device_id=spotifyDeviceId)
+    try:
+        _spotifyClient.pause_playback(device_id=spotifyDeviceId)
+    except spotipy.client.SpotifyException:
+        logger.exception(
+            'Error: Failed to pause Spotify playback'
+            ' - got Spotify error'
+        )
 
 def play(data, device=None):
     '''
