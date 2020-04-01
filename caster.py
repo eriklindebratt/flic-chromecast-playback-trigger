@@ -18,6 +18,8 @@ from datetime import datetime, timedelta
 from util import formatTimeDelta
 import os
 import spotipy
+import spotify_token
+from time import time
 
 logging.getLogger('pychromecast').setLevel(logging.WARN)
 
@@ -33,8 +35,6 @@ WAIT_FOR_PLAYBACK_TIMEOUT = 10.0  # in seconds
 SPOTIFY_OAUTH_TOKENS_CACHE_PATH = os.path.join(
     os.path.dirname(__file__), '.spotify-tokens')
 SPOTIFY_OAUTH_SCOPE = ','.join((
-    'streaming',
-    'app-remote-control',
     'user-read-playback-state',
     'user-modify-playback-state',
     'user-read-currently-playing',
@@ -224,7 +224,7 @@ def stop(device, disconnectFromDevice=False):
     try:
         _pauseSpotify(device)
     except (Exception, SpotifyPlaybackError):
-        pass
+        logger.exception('Failed to pause Spotify playback')
 
     try:
         device.media_controller.stop()
@@ -384,7 +384,9 @@ def _getSpotifyAvailableDevices(calledFromSelf=False):
     return devices
 
 
-def _getSpotifyDeviceIdFromDevice(deviceId=None, deviceName=None):
+def _getSpotifyDeviceIdFromDevice(deviceId=None,
+                                  deviceName=None,
+                                  filters=None):
     '''
     :param deviceId: str Optional if `deviceName` is passed
     :param deviceName: str Optional if `deviceId` is passed
@@ -399,7 +401,24 @@ def _getSpotifyDeviceIdFromDevice(deviceId=None, deviceName=None):
     logger.debug('Available Spotify devices: {}'.format(
         availableSpotifyDevices))
 
-    for spotifyDevice in availableSpotifyDevices:
+    if filters:
+        filteredSpotifyDevices = []
+        for device in availableSpotifyDevices:
+            passedFilters = True
+            for key in filters.keys():
+                if not (key in device.keys()):
+                    passedFilters = False
+                    break
+
+                if device[key] != filters[key]:
+                    passedFilters = False
+                    break
+            if passedFilters:
+                filteredSpotifyDevices.append(device)
+    else:
+        filteredSpotifyDevices = availableSpotifyDevices
+
+    for spotifyDevice in filteredSpotifyDevices:
         if deviceId and spotifyDevice['id'] == deviceId:
             return spotifyDevice['id'], availableSpotifyDevices
         elif deviceName and spotifyDevice['name'] == deviceName:
@@ -447,19 +466,30 @@ def _setupSpotifyClient():
     return _spotifyClient
 
 
+def _getSpotifyChromecastController():
+    try:
+        spotifyUserUsername = os.environ['SPOTIFY_USER_USERNAME']
+        spotifyUserPassword = os.environ['SPOTIFY_USER_PASSWORD']
+    except KeyError:
+        raise SpotifyPlaybackError(
+            'Missing Spotify user credentials in env vars '
+            '`SPOTIFY_USER_USERNAME` and/or `SPOTIFY_USER_PASSWORD`')
+    (spotifyControllerAccessToken,
+        spotifyControllerExpiresAt) = spotify_token.start_session(
+            spotifyUserUsername, spotifyUserPassword)
+    spotifyControllerExpiresIn = spotifyControllerExpiresAt - int(time())
+
+    return SpotifyController(
+        spotifyControllerAccessToken,
+        spotifyControllerExpiresIn
+    )
+
+
 def _playSpotifyUri(device=None, uri=None):
     logger.debug('Playing Spotify URI...')
 
-    tokens = _spotifyClient.auth_manager.get_cached_token()
-
-    print(' - access_token: "{}"'.format(tokens['access_token']))
-    print(' - expires_in: "{}"'.format(tokens['expires_in']))
-
     # launch the Spotify app on the device we want to cast to
-    controller = SpotifyController(
-        tokens['access_token'],
-        tokens['expires_in']
-    )
+    controller = _getSpotifyChromecastController()
     device.register_handler(controller)
     controller.launch_app()
 
@@ -523,7 +553,7 @@ def _pauseSpotify(device):
         raise Exception('Spotify client is not set up')
 
     spotifyDeviceId, availableSpotifyDevices = _getSpotifyDeviceIdFromDevice(
-        deviceName=device.name)
+        deviceName=device.name, filters={'is_active': True})
 
     if not spotifyDeviceId:
         logger.error(

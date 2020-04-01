@@ -11,6 +11,7 @@ psutil = "*"
 spotipy = "*"
 autopep8 = "*"
 flake8 = "*"
+spotify-token = "*"
 
 [requires]
 python_version = "3"
