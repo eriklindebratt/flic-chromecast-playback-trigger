@@ -327,16 +327,17 @@ def isSpotifyPlaying(device):
     if not playbackStatus:
         return False
 
-    logger.warning(
-        'isSpotifyPlaying: Spotify playback status'
-        'indicates an active device ({}) different '
-        'from the one specified ({})'.format(
-            playbackStatus.get('device', {}).get('name'),
-            device.name
+    if playbackStatus.get('is_playing') and \
+            playbackStatus.get('device', {}).get('name') != device.name:
+        logger.warning(
+            'isSpotifyPlaying: Spotify playback status indicates '
+            'a device ({}) currently playing but with different '
+            'device name from the one specified ({}) - considering '
+            'playback status as "not playing"'.format(
+                playbackStatus.get('device', {}).get('name'),
+                device.name
+            )
         )
-    )
-
-    if playbackStatus.get('device', {}).get('name') != device.name:
         return False
 
     return playbackStatus.get('is_playing', False)
