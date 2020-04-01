@@ -222,7 +222,7 @@ def stop(device, disconnectFromDevice=False):
     logger.info('Stopping playback on "{}"'.format(device.name))
 
     try:
-        _pauseSpotify(device)
+        _pauseSpotify()
     except (Exception, SpotifyPlaybackError):
         logger.exception('Failed to pause Spotify playback')
 
@@ -327,6 +327,15 @@ def isSpotifyPlaying(device):
     if not playbackStatus:
         return False
 
+    logger.warning(
+        'isSpotifyPlaying: Spotify playback status'
+        'indicates an active device ({}) different '
+        'from the one specified ({})'.format(
+            playbackStatus.get('device', {}).get('name'),
+            device.name
+        )
+    )
+
     if playbackStatus.get('device', {}).get('name') != device.name:
         return False
 
@@ -347,6 +356,14 @@ def isPaused(device):
 
 def isSpotifyUri(uri):
     return uri.startswith('spotify:')
+
+
+def isSpotifyPlaylistUri(uri):
+    return isSpotifyUri(uri) and uri.startswith('spotify:playlist:')
+
+
+def isSpotifyTrackUri(uri):
+    return isSpotifyUri(uri) and uri.startswith('spotify:track:')
 
 
 def _getSpotifyAvailableDevices(calledFromSelf=False):
@@ -384,47 +401,35 @@ def _getSpotifyAvailableDevices(calledFromSelf=False):
     return devices
 
 
-def _getSpotifyDeviceIdFromDevice(deviceId=None,
-                                  deviceName=None,
-                                  filters=None):
+def _getSpotifyDeviceId(filters):
     '''
-    :param deviceId: str Optional if `deviceName` is passed
-    :param deviceName: str Optional if `deviceId` is passed
+    :param filters: dict
     '''
-
-    if not deviceId and not deviceName:
-        raise Exception(
-            'Either `deviceId` or `deviceName` are required params')
 
     availableSpotifyDevices = _getSpotifyAvailableDevices()
 
     logger.debug('Available Spotify devices: {}'.format(
         availableSpotifyDevices))
 
-    if filters:
-        filteredSpotifyDevices = []
-        for device in availableSpotifyDevices:
-            passedFilters = True
-            for key in filters.keys():
-                if not (key in device.keys()):
-                    passedFilters = False
-                    break
+    filteredSpotifyDevices = []
+    for device in availableSpotifyDevices:
+        passedFilters = True
+        for key in filters.keys():
+            if not (key in device.keys()):
+                passedFilters = False
+                break
 
-                if device[key] != filters[key]:
-                    passedFilters = False
-                    break
-            if passedFilters:
-                filteredSpotifyDevices.append(device)
-    else:
-        filteredSpotifyDevices = availableSpotifyDevices
+            if device[key] != filters[key]:
+                passedFilters = False
+                break
+        if passedFilters:
+            filteredSpotifyDevices.append(device)
 
-    for spotifyDevice in filteredSpotifyDevices:
-        if deviceId and spotifyDevice['id'] == deviceId:
-            return spotifyDevice['id'], availableSpotifyDevices
-        elif deviceName and spotifyDevice['name'] == deviceName:
-            return spotifyDevice['id'], availableSpotifyDevices
-
-    return None, availableSpotifyDevices
+    try:
+        deviceId = filteredSpotifyDevices[0]['id']
+    except IndexError:
+        deviceId = None
+    return deviceId, availableSpotifyDevices
 
 
 def _setupSpotifyClient():
@@ -503,8 +508,8 @@ def _playSpotifyUri(device=None, uri=None):
             'Failed to launch Spotify controller due to credential error'
         )
 
-    spotifyDeviceId, availableSpotifyDevices = _getSpotifyDeviceIdFromDevice(
-        deviceId=controller.device)
+    spotifyDeviceId, availableSpotifyDevices = _getSpotifyDeviceId(
+        filters={'id': controller.device})
 
     if not spotifyDeviceId:
         logger.error(
@@ -520,25 +525,36 @@ def _playSpotifyUri(device=None, uri=None):
             )
         )
 
-    # offset = {'position': 0}
-    # if uri.startswith('spotify:playlist:') and randomizedPlaylistStart:
-        # playlistId = uri.split('spotify:playlist:', False)[0]
-        # playlistItemCount = len(_spotifyClient.user_playlist_tracks(
-        # playlist_id=playlistId)['items'])
-
-        # offset = {'position': randint(0, playlistItemCount-1)}
-
-        # # need to enable repeat to ensure items after
-        # # the offset position will get played
-        # _spotifyClient.repeat('context', device_id=spotifyDeviceId)
-
     # start playback
     try:
-        _spotifyClient.start_playback(
-            device_id=spotifyDeviceId,
-            context_uri=uri  # ,
-            # offset=offset
-        )
+        if isSpotifyPlaylistUri(uri):
+            # offset = {'position': 0}
+            # if isSpotifyPlaylistUri(uri) and randomizedPlaylistStart:
+            # playlistId = uri.split('spotify:playlist:', False)[0]
+            # playlistItemCount = len(_spotifyClient.user_playlist_tracks(
+            # playlist_id=playlistId)['items'])
+
+            # offset = {'position': randint(0, playlistItemCount-1)}
+
+            # # need to enable repeat to ensure items after
+            # # the offset position will get played
+            # _spotifyClient.repeat('context', device_id=spotifyDeviceId)
+
+            _spotifyClient.start_playback(
+                device_id=spotifyDeviceId,
+                context_uri=uri  # ,
+                # offset=offset
+            )
+        elif isSpotifyTrackUri(uri):
+            _spotifyClient.start_playback(
+                device_id=spotifyDeviceId,
+                uris=[uri]
+            )
+        else:
+            _spotifyClient.start_playback(
+                device_id=spotifyDeviceId,
+                context_uri=uri
+            )
     except spotipy.client.SpotifyException:
         logger.exception(
             'Error: Failed to start Spotify playback'
@@ -548,26 +564,19 @@ def _playSpotifyUri(device=None, uri=None):
         raise SpotifyPlaybackError('Could not start playback')
 
 
-def _pauseSpotify(device):
+def _pauseSpotify():
     if not _spotifyClient:
         raise Exception('Spotify client is not set up')
 
-    spotifyDeviceId, availableSpotifyDevices = _getSpotifyDeviceIdFromDevice(
-        deviceName=device.name, filters={'is_active': True})
+    spotifyDeviceId, availableSpotifyDevices = _getSpotifyDeviceId(
+        filters={'is_active': True})
 
     if not spotifyDeviceId:
-        logger.error(
-            'Device with name "{}" is unknown to Spotify. '
-            'Available devices: {}'.format(
-                device.name,
-                availableSpotifyDevices
-            )
+        logger.debug(
+            'Can\'t pause Spotify playback - '
+            'Spotify returned no active devices'
         )
-        raise SpotifyPlaybackError(
-            'Device with name "{}" is unknown to Spotify'.format(
-                device.name
-            )
-        )
+        return
 
     try:
         _spotifyClient.pause_playback(device_id=spotifyDeviceId)
