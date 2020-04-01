@@ -2,6 +2,7 @@ import socket
 import psutil
 import os
 
+
 def formatTimeDelta(delta):
     hours, remainder = divmod(delta.seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
@@ -11,6 +12,7 @@ def formatTimeDelta(delta):
         int(minutes),
         int(seconds)
     )
+
 
 def getLocalIpAddress():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -32,7 +34,6 @@ def getProcessesByName(processNames, args=None):
             if proc.pid == os.getpid():
                 continue
 
-            procName = proc.name()
             procArgs = ' '.join(proc.cmdline()[1:])
 
             if proc.name() in processNames:
@@ -46,6 +47,7 @@ def getProcessesByName(processNames, args=None):
             psutil.NoSuchProcess,
             psutil.AccessDenied,
             psutil.ZombieProcess
-        ): pass
+        ):
+            pass
 
     return processes

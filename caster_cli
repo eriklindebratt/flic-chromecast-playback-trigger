@@ -29,6 +29,7 @@ hasDevicePlayerStatusListener = False
 httpServer = None
 httpServerThread = None
 
+
 class HttpRequestHandler(SimpleHTTPRequestHandler):
     def handle(self):
         try:
@@ -53,6 +54,7 @@ def startWebServer(port, root=None):
     httpServerThread.daemon = True
     httpServerThread.start()
 
+
 def stopWebServer():
     global httpServer
 
@@ -65,9 +67,11 @@ def stopWebServer():
     httpServer.server_close()
     httpServer = None
 
+
 def onCasterError(error=None):
     logger.error('Caster got error: {}'.format(error))
     exit(1, forceQuitCaster=True)
+
 
 def stopAndQuitCasting(device, forceQuit=False):
     global castDevice, hasDevicePlayerStatusListener
@@ -84,6 +88,7 @@ def stopAndQuitCasting(device, forceQuit=False):
             caster.stop(device)
 
         caster.quit(device, disconnectFromDevice=True)
+
 
 def exit(exitCode=0, forceQuitCaster=False):
     global castDevice
@@ -108,16 +113,20 @@ def exit(exitCode=0, forceQuitCaster=False):
 
     sys.exit(exitCode)
 
+
 def onSIGINT(*args):
     logger.info('Received SIGINT')
     exit(0)
+
 
 def onSIGTERM(*args):
     logger.info('Received SIGTERM')
     exit(0)
 
+
 def collectArgs():
-    argParser = ArgumentParser(description='Play a media file on a Chromecast device')
+    argParser = ArgumentParser(
+        description='Play a media file on a Chromecast device')
     argParser._action_groups.pop()
 
     requiredArgs = argParser.add_argument_group('required arguments')
@@ -151,18 +160,6 @@ def collectArgs():
         help='Volume (0.0-1.0) to set on Chromecast device'
     )
     optionalArgs.add_argument(
-        '--spotifyUserUsername',
-        '-su',
-        type=str,
-        help='Required to play Spotify URIs'
-    )
-    optionalArgs.add_argument(
-        '--spotifyUserPassword',
-        '-sp',
-        type=str,
-        help='Required to play Spotify URIs'
-    )
-    optionalArgs.add_argument(
         '--quit',
         '-q',
         action='store_true',
@@ -181,22 +178,20 @@ def collectArgs():
             argParser.print_usage()
             sys.exit(1)
 
-        if not (args.uri.startswith('https://') or caster.isSpotifyUri(args.uri)) and re.match('^[a-z]+:', args.uri):
+        if not (args.uri.startswith('https://')
+                or caster.isSpotifyUri(args.uri)) \
+                and re.match('^[a-z]+:', args.uri):
             argParser.error(
                 'URI must be an HTTPS URL, a Spotify URI or '
                 'a path to a local file.'
             )
 
-        if caster.isSpotifyUri(args.uri) and not (args.spotifyUserUsername and args.spotifyUserPassword):
-            argParser.error(
-                'Spotify user credentials are required '
-                'to play Spotify URIs'
-            )
-
-        if args.deviceVolume and (args.deviceVolume < 0.0 or args.deviceVolume > 1.0):
+        if args.deviceVolume \
+                and (args.deviceVolume < 0.0 or args.deviceVolume > 1.0):
             argParser.error('Device volume must be between 0.0 and 1.0.')
 
     return args
+
 
 def quitProcesses(processes):
     if not processes:
@@ -222,6 +217,7 @@ def quitProcesses(processes):
         for p in alive:
             p.kill()
 
+
 def main():
     global logger, castDevice, hasDevicePlayerStatusListener
 
@@ -242,20 +238,13 @@ def main():
         ))
         return
 
-    spotifyUser = None
-    if args.spotifyUserUsername and args.spotifyUserPassword:
-        spotifyUser ={
-            'username': args.spotifyUserUsername,
-            'password': args.spotifyUserPassword
-        }
-
     caster.setup(
         logLevel=logger.level,
-        errorHandler=onCasterError,
-        spotifyUser=spotifyUser
+        errorHandler=onCasterError
     )
 
-    if not re.match('^https?:\/\/', args.uri) and not caster.isSpotifyUri(args.uri):
+    if not re.match('^https?://', args.uri) \
+            and not caster.isSpotifyUri(args.uri):
         resolvedUri = 'http://{}:{}/{}'.format(
             getLocalIpAddress(),
             args.servePort,
@@ -272,10 +261,7 @@ def main():
         resolvedUri = args.uri
 
     try:
-        try:
-            title = os.path.basename(resolvedUri) or 'Unknown'
-        except:
-            title = 'Unknown'
+        title = os.path.basename(resolvedUri) or 'Unknown'
 
         castDevice = caster.play({
             'media': {
@@ -288,7 +274,6 @@ def main():
             'volume': args.deviceVolume
         }, caster.getDevice(args.device))
     except (caster.DeviceNotFoundError,
-            caster.PlaybackStartTimeoutError,
             caster.SpotifyPlaybackError) as e:
         logger.error('Failed to start playback: {}'.format(e))
         exit(1)
@@ -336,6 +321,7 @@ def main():
     while True:
         sleep(10)
         pass
+
 
 if __name__ == '__main__':
     main()
