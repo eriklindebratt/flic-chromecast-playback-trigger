@@ -9,3 +9,5 @@ flic-server.log
 flic-server.error.log
 flic-server.db
 fliclib-linux-hci
+
+.spotify-tokens

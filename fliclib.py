@@ -1,3 +1,5 @@
+# flake8: noqa
+
 """Flic client library for python
 
 Requires python 3.3 or higher.

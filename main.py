@@ -6,6 +6,7 @@ import logging
 import sys
 import os
 import signal
+import json
 
 for handler in logging.root.handlers[:]:
     logging.root.removeHandler(handler)
@@ -28,6 +29,7 @@ deviceNamesToSetVolumeFor = None
 deviceToCastTo = None
 hasDevicePlayerStatusListener = False
 
+
 def getFlicButtonName(buttonId):
     if buttonId == BLACK_BUTTON_ADDRESS:
         return 'Black'
@@ -35,6 +37,7 @@ def getFlicButtonName(buttonId):
         return 'Turqouise'
     else:
         return 'UNKNOWN'
+
 
 def stopAndQuitCasting(device, forceQuit=False):
     global castDevice, hasDevicePlayerStatusListener
@@ -47,6 +50,7 @@ def stopAndQuitCasting(device, forceQuit=False):
             caster.stop(device)
 
         caster.quit(device, disconnectFromDevice=True)
+
 
 def playOrStop(data):
     '''
@@ -62,7 +66,6 @@ def playOrStop(data):
         try:
             castDevice = caster.play(data, caster.getDevice(deviceToCastTo))
         except (caster.DeviceNotFoundError,
-                caster.PlaybackStartTimeoutError,
                 caster.SpotifyPlaybackError) as e:
             logger.error('Failed to start playback: {}'.format(e))
             exit(1)
@@ -95,7 +98,8 @@ def playOrStop(data):
 
             if status.stream_type == caster.STREAM_TYPE_LIVE and \
                     status.player_state == caster.MEDIA_PLAYER_STATE_PAUSED:
-                logger.info('Player state is valid for exit (paused live stream)')
+                logger.info(
+                    'Player state is valid for exit (paused live stream)')
                 stopAndQuitCasting(device)
                 return
 
@@ -137,6 +141,29 @@ def playOrStop(data):
                     ) for i in devicesToSetVolumeFor]
         ########################
 
+
+def getFlicButtonCasterMediaData(buttonAddress):
+    buttonCasterMediaData = None
+
+    try:
+        buttonCasterMediaData = json.loads(
+            os.environ['CASTER_MEDIA_DATA']
+        )[buttonAddress]
+    except json.decoder.JSONDecodeError:
+        logger.exception(
+            'Error: Failed to parse caster media config'
+            ' for Flic button {}'.format(getFlicButtonName(buttonAddress))
+        )
+    except KeyError:
+        logger.warning(
+            'No caster media config found for Flic button {}'.format(
+                getFlicButtonName(buttonAddress)
+            )
+        )
+
+    return buttonCasterMediaData
+
+
 def onFlicButtonClickOrHold(channel, clickType, wasQueued, timeDiff):
     if clickType != fliclib.ClickType.ButtonClick:
         return
@@ -157,33 +184,34 @@ def onFlicButtonClickOrHold(channel, clickType, wasQueued, timeDiff):
         )
     )
 
-    if channel.bd_addr == BLACK_BUTTON_ADDRESS:
-        playOrStop({
-            'media': {
-                'uri': 'spotify:playlist:37i9dQZF1DWVomJW0F2PbY'
-            }
-        })
-    elif channel.bd_addr == TURQUOISE_BUTTON_ADDRESS:
-        playOrStop({
-            'media': {
-                'uri': 'https://sverigesradio.se/topsy/direkt/srapi/132.mp3',
-                'args': {
-                    'stream_type': caster.STREAM_TYPE_LIVE,
-                    'autoplay': True,
-                    'title': 'P1',
-                    'thumb': 'https://static-cdn.sr.se/sida/images/132/2186745_512_512.jpg?preset=api-default-square'
-                }
-            }
-        })
+    buttonCasterMediaData = getFlicButtonCasterMediaData(channel.bd_addr)
 
-def onFlicButtonConnectionStatusChanged(channel, connectionStatus, disconnectReason):
+    if buttonCasterMediaData:
+        playOrStop({'media': buttonCasterMediaData})
+    else:
+        logger.info(
+            'Not playing nor stopping - got no caster'
+            ' media data for Flic button {}'.format(
+                getFlicButtonName(channel.bd_addr)
+            )
+        )
+
+
+def onFlicButtonConnectionStatusChanged(channel,
+                                        connectionStatus,
+                                        disconnectReason):
     logger.debug('Button "{}" changed connection status to: {}{}'.format(
         channel.bd_addr,
         connectionStatus,
-        ' ({})'.format(disconnectReason) if connectionStatus == fliclib.ConnectionStatus.Disconnected else ''
+        ' ({})'.format(
+            disconnectReason) if connectionStatus ==
+        fliclib.ConnectionStatus.Disconnected else ''
     ))
 
-def onFlicButtonCreateConnectionChannelResponse(channel, error, connectionStatus):
+
+def onFlicButtonCreateConnectionChannelResponse(channel,
+                                                error,
+                                                connectionStatus):
     if error and error is not fliclib.CreateConnectionChannelError.NoError:
         logger.error(
             'Button "{}" got error in create connection channel '
@@ -195,7 +223,7 @@ def onFlicButtonCreateConnectionChannelResponse(channel, error, connectionStatus
         )
     else:
         logger.debug('Button "{}" got create connection channel response'
-            .format(channel.bd_addr))
+                     .format(channel.bd_addr))
 
         flicButtonConnectionChannels.append(channel)
 
@@ -203,9 +231,9 @@ def onFlicButtonCreateConnectionChannelResponse(channel, error, connectionStatus
 def onFlicButtonConnectionChannelRemoved(channel, removedReason=None):
     global flicButtonConnectionChannels
 
-    flicButtonConnectionChannels = [i for i in flicButtonConnectionChannels \
-        if i != channel
-    ]
+    flicButtonConnectionChannels = [i for i in flicButtonConnectionChannels
+                                    if i != channel
+                                    ]
 
     logger.debug(
         'Button connection channel for button "{}" was removed'.format(
@@ -219,10 +247,12 @@ def onFlicNewVerifiedButton(bdAddr):
 
     cc.on_button_click_or_hold = onFlicButtonClickOrHold
     cc.on_connection_status_changed = onFlicButtonConnectionStatusChanged
-    cc.on_create_connection_channel_response = onFlicButtonCreateConnectionChannelResponse
+    cc.on_create_connection_channel_response = \
+        onFlicButtonCreateConnectionChannelResponse
     cc.on_removed = onFlicButtonConnectionChannelRemoved
 
     flicClient.add_connection_channel(cc)
+
 
 def onFlicGetInfo(items):
     logger.debug('onFlicGetInfo - items: {}'.format(items))
@@ -230,8 +260,11 @@ def onFlicGetInfo(items):
     for bdAddr in items['bd_addr_of_verified_buttons']:
         onFlicNewVerifiedButton(bdAddr)
 
+
 def onFlicBluetoothControllerStateChange(state):
-    logger.info('onFlicBluetoothControllerStateChange - state: {}'.format(state))
+    logger.info(
+        'onFlicBluetoothControllerStateChange - state: {}'.format(state)
+    )
 
     if state == fliclib.ConnectionStatus.Disconnected:
         logger.info(
@@ -240,9 +273,11 @@ def onFlicBluetoothControllerStateChange(state):
 
         exit(1)
 
+
 def onCasterError(error=None):
     logger.error('Caster got error: {}'.format(error))
     exit(1, forceQuitCaster=True)
+
 
 def exit(exitCode=0, forceQuitCaster=False):
     global castDevice
@@ -280,13 +315,16 @@ def exit(exitCode=0, forceQuitCaster=False):
 
     sys.exit(exitCode)
 
+
 def onSIGINT(*args):
     logger.info('Received SIGINT')
     exit(0)
 
+
 def onSIGTERM(*args):
     logger.info('Received SIGTERM')
     exit(0)
+
 
 if __name__ == '__main__':
     logger = logging.getLogger(__name__)
@@ -306,14 +344,6 @@ if __name__ == '__main__':
     elif logLevel == 'DEBUG':
         logger.setLevel(logging.DEBUG)
 
-    spotifyUser = None
-    if os.environ.get('SPOTIFY_USER_USERNAME') and \
-            os.environ.get('SPOTIFY_USER_PASSWORD'):
-        spotifyUser = {
-            'username': os.environ.get('SPOTIFY_USER_USERNAME'),
-            'password': os.environ.get('SPOTIFY_USER_PASSWORD')
-        }
-
     if not deviceToCastTo:
         logger.error('No target device specified in env vars')
         sys.exit(1)
@@ -322,25 +352,19 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, onSIGTERM)
 
     # caster.setup(
-        # logLevel=logger.level,
-        # errorHandler=onCasterError,
-        # spotifyUser=spotifyUser
+    #     logLevel=logger.level,
+    #     errorHandler=onCasterError,
     # )
     # logger.info('ready')
     # input('press key...')
-    # playOrStop({
-        # 'media': {
-            # 'uri': 'https://sverigesradio.se/topsy/direkt/srapi/132.mp3',
-            # 'args': {
-                # 'stream_type': caster.STREAM_TYPE_LIVE,
-                # 'autoplay': True,
-                # 'title': 'P1',
-                # 'thumb': 'https://static-cdn.sr.se/sida/images/132/2186745_512_512.jpg?preset=api-default-square'
-            # }
-        # }
-    # })
+    # onFlicButtonClickOrHold(
+    #     fliclib.ButtonConnectionChannel(BLACK_BUTTON_ADDRESS),
+    #     fliclib.ClickType.ButtonClick,
+    #     False,
+    #     0
+    # )
     # while True:
-        # pass
+    #     pass
 
     try:
         logger.info('Setting up Flic client...')
@@ -350,19 +374,18 @@ if __name__ == '__main__':
         flicClient = fliclib.FlicClient('localhost')
         flicClient.get_info(onFlicGetInfo)
         flicClient.on_new_verified_button = onFlicNewVerifiedButton
-        flicClient.on_bluetooth_controller_state_change = onFlicBluetoothControllerStateChange
+        flicClient.on_bluetooth_controller_state_change = \
+            onFlicBluetoothControllerStateChange
     except Exception as e:
         logger.error('Failed to start Flic client: {}'.format(e))
         exit(1, forceQuitCaster=True)
     else:
         caster.setup(
             logLevel=logger.level,
-            errorHandler=onCasterError,
-            spotifyUser=spotifyUser
+            errorHandler=onCasterError
         )
 
     logger.info('Ready - waiting for button clicks...\n---')
 
     # note that this method is blocking!
     flicClient.handle_events()
-
