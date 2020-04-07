@@ -6,6 +6,7 @@ import logging
 import sys
 import os
 import signal
+import json
 
 for handler in logging.root.handlers[:]:
     logging.root.removeHandler(handler)
@@ -141,6 +142,28 @@ def playOrStop(data):
         ########################
 
 
+def getFlicButtonCasterMediaData(buttonAddress):
+    buttonCasterMediaData = None
+
+    try:
+        buttonCasterMediaData = json.loads(
+            os.environ['CASTER_MEDIA_DATA']
+        )[buttonAddress]
+    except json.decoder.JSONDecodeError:
+        logger.exception(
+            'Error: Failed to parse caster media config'
+            ' for Flic button {}'.format(getFlicButtonName(buttonAddress))
+        )
+    except KeyError:
+        logger.warning(
+            'No caster media config found for Flic button {}'.format(
+                getFlicButtonName(buttonAddress)
+            )
+        )
+
+    return buttonCasterMediaData
+
+
 def onFlicButtonClickOrHold(channel, clickType, wasQueued, timeDiff):
     if clickType != fliclib.ClickType.ButtonClick:
         return
@@ -161,26 +184,17 @@ def onFlicButtonClickOrHold(channel, clickType, wasQueued, timeDiff):
         )
     )
 
-    if channel.bd_addr == BLACK_BUTTON_ADDRESS:
-        playOrStop({
-            'media': {
-                'uri': 'spotify:playlist:37i9dQZF1DWVomJW0F2PbY'
-            }
-        })
-    elif channel.bd_addr == TURQUOISE_BUTTON_ADDRESS:
-        playOrStop({
-            'media': {
-                'uri': 'https://sverigesradio.se/topsy/direkt/srapi/132.mp3',
-                'args': {
-                    'stream_type': caster.STREAM_TYPE_LIVE,
-                    'autoplay': True,
-                    'title': 'P1',
-                    'thumb':
-                    'https://static-cdn.sr.se/sida/images/132/'
-                        '2186745_512_512.jpg?preset=api-default-square'
-                }
-            }
-        })
+    buttonCasterMediaData = getFlicButtonCasterMediaData(channel.bd_addr)
+
+    if buttonCasterMediaData:
+        playOrStop({'media': buttonCasterMediaData})
+    else:
+        logger.info(
+            'Not playing nor stopping - got no caster'
+            ' media data for Flic button {}'.format(
+                getFlicButtonName(channel.bd_addr)
+            )
+        )
 
 
 def onFlicButtonConnectionStatusChanged(channel,
@@ -338,26 +352,19 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, onSIGTERM)
 
     # caster.setup(
-    # logLevel=logger.level,
-    # errorHandler=onCasterError,
+    #     logLevel=logger.level,
+    #     errorHandler=onCasterError,
     # )
     # logger.info('ready')
     # input('press key...')
-    # playOrStop({
-    # 'media': {
-    # 'uri': 'https://sverigesradio.se/topsy/direkt/srapi/132.mp3',
-    # 'args': {
-    # 'stream_type': caster.STREAM_TYPE_LIVE,
-    # 'autoplay': True,
-    # 'title': 'P1',
-    # 'thumb':
-    # 'https://static-cdn.sr.se/sida/images/132/'
-    #     '2186745_512_512.jpg?preset=api-default-square'
-    # }
-    # }
-    # })
+    # onFlicButtonClickOrHold(
+    #     fliclib.ButtonConnectionChannel(BLACK_BUTTON_ADDRESS),
+    #     fliclib.ClickType.ButtonClick,
+    #     False,
+    #     0
+    # )
     # while True:
-    # pass
+    #     pass
 
     try:
         logger.info('Setting up Flic client...')
