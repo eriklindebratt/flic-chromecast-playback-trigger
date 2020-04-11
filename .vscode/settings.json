@@ -8,5 +8,6 @@
     "E731",
     "--exclude",
     "fliclib.py"
-  ]
+  ],
+  "python.pythonPath": "/Users/erik/.local/share/virtualenvs/flic-chromecast-love-xqJ68ZWA/bin/python"
 }

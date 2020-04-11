@@ -495,9 +495,14 @@ def _playSpotifyUri(device=None, uri=None):
     logger.debug('Playing Spotify URI...')
 
     # launch the Spotify app on the device we want to cast to
-    controller = _getSpotifyChromecastController()
-    device.register_handler(controller)
-    controller.launch_app()
+    try:
+        controller = _getSpotifyChromecastController()
+        device.register_handler(controller)
+        controller.launch_app()
+    except pychromecast.error.LaunchError as e:
+        raise SpotifyPlaybackError(
+            'Failed to launch Spotify controller: {}'.format(e)
+        )
 
     if not controller.is_launched and not controller.credential_error:
         raise SpotifyPlaybackError(
